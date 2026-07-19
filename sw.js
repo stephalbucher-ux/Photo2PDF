@@ -1,5 +1,5 @@
 /* PHOTO 2 PDF service worker — offline support */
-const CACHE = "photo2pdf-v4-1";
+const CACHE = "photo2pdf-v4-2";
 const SHELL = [
   "./",
   "./index.html",
@@ -15,7 +15,14 @@ const SHELL = [
 ];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // cache:"reload" force le réseau (ignore le cache HTTP) → jamais d'ancienne version re-capturée
+  e.waitUntil(
+    caches.open(CACHE).then((c) =>
+      Promise.all(SHELL.map((u) =>
+        fetch(u, { cache: "reload" }).then((res) => { if (res.ok) return c.put(u, res); })
+      ))
+    ).then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener("activate", (e) => {
