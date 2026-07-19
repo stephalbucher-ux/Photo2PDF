@@ -1,0 +1,18 @@
+{
+  "name": "Scanorama — Scanner de documents",
+  "short_name": "Scanorama",
+  "description": "Prends une photo d'un document et obtiens un PDF net : recadrage automatique et filtre noir & blanc par seuillage adaptatif.",
+  "lang": "fr",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#14181F",
+  "theme_color": "#14181F",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

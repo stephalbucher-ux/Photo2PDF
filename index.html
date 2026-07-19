@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#14181F">
+<title>Scanorama — Photo → PDF net</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/favicon-64.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">Scanorama</span>
+    </div>
+    <div class="counter" id="counter"><span id="pageCount">0</span> page<span id="plural"></span></div>
+  </header>
+
+  <main class="stage">
+    <!-- Preview surface -->
+    <section class="viewer" id="viewer">
+      <div class="empty" id="emptyState">
+        <div class="empty-icon" aria-hidden="true"></div>
+        <p class="empty-title">Aucun document</p>
+        <p class="empty-sub">Prends une photo d'un document. Le cadrage et le filtre se font tout seuls.</p>
+      </div>
+      <div class="preview-wrap" id="previewWrap" hidden>
+        <canvas id="previewCanvas"></canvas>
+        <div class="scanline" id="scanline" hidden></div>
+      </div>
+      <div class="badge" id="detectBadge" hidden></div>
+    </section>
+
+    <!-- Filter control -->
+    <section class="filters" id="filters" hidden>
+      <div class="seg" role="tablist" aria-label="Filtre">
+        <button class="seg-btn" data-filter="color" role="tab">Couleur</button>
+        <button class="seg-btn" data-filter="gray" role="tab">Gris</button>
+        <button class="seg-btn is-active" data-filter="bw" role="tab" aria-selected="true">N&amp;B</button>
+      </div>
+      <button class="tune-toggle" id="tuneToggle" hidden>Réglages N&amp;B</button>
+      <div class="tune" id="tunePanel" hidden>
+        <label class="tune-row">
+          <span>Finesse <em id="blockVal">25</em></span>
+          <input type="range" id="blockSize" min="3" max="61" step="2" value="25">
+        </label>
+        <label class="tune-row">
+          <span>Seuil <em id="cVal">10</em></span>
+          <input type="range" id="cValue" min="-10" max="30" step="1" value="10">
+        </label>
+      </div>
+    </section>
+
+    <!-- Page queue -->
+    <section class="queue" id="queue" hidden>
+      <div class="queue-strip" id="queueStrip"></div>
+    </section>
+  </main>
+
+  <footer class="dock">
+    <div class="dock-row">
+      <button class="btn btn-primary" id="captureBtn">
+        <span class="btn-ic" aria-hidden="true">◉</span> Capturer
+      </button>
+      <button class="btn btn-ghost" id="addBtn" disabled>
+        <span class="btn-ic" aria-hidden="true">＋</span> Ajouter
+      </button>
+    </div>
+    <div class="dock-row">
+      <button class="btn btn-accent" id="exportBtn" disabled>Créer le PDF</button>
+    </div>
+    <label class="split-opt">
+      <input type="checkbox" id="splitToggle">
+      <span>Un fichier PDF par page</span>
+    </label>
+    <input type="file" id="fileInput" accept="image/*" capture="environment" hidden>
+  </footer>
+
+  <!-- Boot / loading overlay -->
+  <div class="boot" id="boot">
+    <div class="boot-mark"></div>
+    <p class="boot-text" id="bootText">Préparation du moteur de scan…</p>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast" hidden></div>
+</div>
+
+<!-- Libraries (loaded in the user's browser) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js"></script>
+<script>
+  // Robust OpenCV.js init: expose a Module hook before the script loads.
+  window.__cvReady = false;
+  var Module = { onRuntimeInitialized() { window.__cvReady = true; window.dispatchEvent(new Event('opencv-ready')); } };
+</script>
+<script async src="https://docs.opencv.org/4.10.0/opencv.js"></script>
+<script src="app.js" defer></script>
+</body>
+</html>
