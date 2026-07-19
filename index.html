@@ -205,8 +205,8 @@
   <input type="file" id="galleryInput" accept="image/jpeg,image/png,image/webp,image/*" hidden>
 </div>
 
-<!-- Librairies -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js"></script>
+<!-- Librairies (auto-hébergées : aucune dépendance CDN) -->
+<script src="jspdf.umd.min.js"></script>
 <script>
   window.__cvReady = false;
   var Module = { onRuntimeInitialized() { window.__cvReady = true; window.dispatchEvent(new Event('opencv-ready')); } };

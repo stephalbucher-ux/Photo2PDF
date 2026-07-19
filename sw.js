@@ -1,11 +1,12 @@
 /* PHOTO 2 PDF service worker — offline support */
-const CACHE = "photo2pdf-v4";
+const CACHE = "photo2pdf-v4-1";
 const SHELL = [
   "./",
   "./index.html",
   "./style.css",
   "./app.js",
   "./opencv.js",
+  "./jspdf.umd.min.js",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png",

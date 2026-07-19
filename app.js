@@ -8,7 +8,7 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = "4.0";
+  const APP_VERSION = "4.1";
 
   // ---------- State ----------
   let mode = null;             // "single" | "batch" | "open"
@@ -835,11 +835,18 @@
     showToast(msg);
   }
 
+  function getJsPDF() {
+    if (window.jspdf && window.jspdf.jsPDF) return window.jspdf.jsPDF;
+    showToast("Module PDF non chargé — ferme et rouvre l'application.", true);
+    return null;
+  }
+
   downloadBtn.addEventListener("click", async () => {
     try {
       downloadBtn.disabled = true;
       const name = sanitizeName(fileName.value);
-      const { jsPDF } = window.jspdf;
+      const jsPDF = getJsPDF();
+      if (!jsPDF) return;
       const list = await collectPagesForExport();
       const doc = buildDoc(jsPDF, list);
       doc.save(name + ".pdf");
@@ -856,7 +863,8 @@
     try {
       shareBtn.disabled = true;
       const name = sanitizeName(fileName.value);
-      const { jsPDF } = window.jspdf;
+      const jsPDF = getJsPDF();
+      if (!jsPDF) return;
       const list = await collectPagesForExport();
       const doc = buildDoc(jsPDF, list);
       const blob = doc.output("blob");
