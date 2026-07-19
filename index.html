@@ -103,7 +103,19 @@
   window.__cvReady = false;
   var Module = { onRuntimeInitialized() { window.__cvReady = true; window.dispatchEvent(new Event('opencv-ready')); } };
 </script>
-<script async src="https://docs.opencv.org/4.10.0/opencv.js"></script>
+<script async src="opencv.js" onload="
+  (function () {
+    function ready(m) { if (m) window.cv = m; window.__cvReady = true; window.dispatchEvent(new Event('opencv-ready')); }
+    var c = window.cv;
+    if (c && typeof c.then === 'function') { c.then(ready); }
+    else if (c && c.Mat) { ready(); }
+    else {
+      var p = setInterval(function () {
+        if (window.cv && window.cv.Mat) { clearInterval(p); ready(); }
+      }, 100);
+    }
+  })();
+"></script>
 <script src="app.js" defer></script>
 </body>
 </html>
