@@ -1,7 +1,7 @@
 {
-  "name": "Scanorama — Scanner de documents",
-  "short_name": "Scanorama",
-  "description": "Prends une photo d'un document et obtiens un PDF net : recadrage automatique et filtre noir & blanc par seuillage adaptatif.",
+  "name": "PHOTO 2 PDF — Scanner de documents",
+  "short_name": "Photo 2 PDF",
+  "description": "Numérisez vos documents en PDF nets : scan unique, scan par lot ou image de la galerie, recadrage 4 points, rotation, filtres et réglages qualité.",
   "lang": "fr",
   "start_url": ".",
   "scope": ".",

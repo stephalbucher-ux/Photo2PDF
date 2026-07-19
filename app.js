@@ -1,57 +1,118 @@
-/* Scanorama — photo → PDF scanner PWA
-   Pipeline : capture/import → détection auto (OpenCV.js) ou détourage manuel 4 points
-              → rotation → filtre (couleur / amélioré / gris / N&B adaptatif) → PDF
-   Mémoire : les pages ajoutées sont stockées en JPEG/PNG compressé (dataURL),
-             jamais en canvas pleine résolution ; tous les canvas et cv.Mat
-             intermédiaires sont libérés immédiatement.
+/* PHOTO 2 PDF — © SA IA
+   Architecture : splash → accueil (SCAN UNIQUE / SCAN LOT / OUVRIR IMAGE) → édition → enregistrement
+   Moteur : détection auto (OpenCV.js), détourage manuel 4 points, rotation,
+            filtres (couleur / amélioré / gris / N&B adaptatif), réglages qualité,
+            export PDF avec renommage, qualité au choix et partage système.
+   Mémoire : pages stockées compressées, canvas et cv.Mat libérés immédiatement.
 */
 (() => {
   "use strict";
 
+  const APP_VERSION = "4.0";
+
   // ---------- State ----------
-  // Une page ajoutée = { dataUrl, mime, w, h } (compressé, ~10-20× plus léger qu'un canvas)
-  const pages = [];
-  // Page en cours d'édition = { src, corners|null, color, filter, block, c, detected }
-  let current = null;
+  let mode = null;             // "single" | "batch" | "open"
+  const pages = [];            // lot : { dataUrl, mime, w, h, thumbUrl }
+  let current = null;          // { src, corners|null, color, detected }
+  let activeFilter = "enhance";
+  let quality = "standard";    // compact | standard | high
   let cvReady = window.__cvReady === true;
+  const bootT0 = Date.now();
 
   // ---------- DOM ----------
   const $ = (id) => document.getElementById(id);
-  const boot = $("boot"), bootText = $("bootText");
+  const screenSplash = $("screenSplash"), screenHome = $("screenHome"), screenEdit = $("screenEdit");
+  const btnSingle = $("btnSingle"), btnBatch = $("btnBatch"), btnOpen = $("btnOpen");
+  const backBtn = $("backBtn"), modeTitle = $("modeTitle");
   const fileInput = $("fileInput"), galleryInput = $("galleryInput");
-  const captureBtn = $("captureBtn"), importBtn = $("importBtn");
-  const addBtn = $("addBtn"), exportBtn = $("exportBtn");
   const emptyState = $("emptyState"), previewWrap = $("previewWrap");
   const previewCanvas = $("previewCanvas"), scanline = $("scanline");
   const detectBadge = $("detectBadge");
   const editBar = $("editBar"), rotLeftBtn = $("rotLeftBtn"), rotRightBtn = $("rotRightBtn"), cropBtn = $("cropBtn");
   const filters = $("filters"), tuneToggle = $("tuneToggle"), tunePanel = $("tunePanel");
+  const brightness = $("brightness"), contrast = $("contrast"), sharpness = $("sharpness");
+  const brightVal = $("brightVal"), contrastVal = $("contrastVal"), sharpVal = $("sharpVal");
   const blockSize = $("blockSize"), cValue = $("cValue"), blockVal = $("blockVal"), cVal = $("cVal");
+  const rowBright = $("rowBright"), rowContrast = $("rowContrast"), rowSharp = $("rowSharp");
+  const rowBlock = $("rowBlock"), rowC = $("rowC");
   const queue = $("queue"), queueStrip = $("queueStrip"), clearBtn = $("clearBtn");
-  const counter = { count: $("pageCount"), plural: $("plural") };
-  const splitToggle = $("splitToggle"), toast = $("toast");
+  const counter = $("counter"), pageCount = $("pageCount"), plural = $("plural");
+  const dockBatch = $("dockBatch"), dockSingle = $("dockSingle");
+  const addPageBtn = $("addPageBtn"), finishBtn = $("finishBtn");
+  const retakeBtn = $("retakeBtn"), saveBtn = $("saveBtn");
+  const saveSheet = $("saveSheet"), fileName = $("fileName"), qualityHint = $("qualityHint");
+  const downloadBtn = $("downloadBtn"), shareBtn = $("shareBtn"), saveCancel = $("saveCancel");
+  const toast = $("toast");
   const cropEditor = $("cropEditor"), cropStage = $("cropStage"), cropCanvas = $("cropCanvas");
   const loupeCanvas = $("loupeCanvas");
   const cropCancel = $("cropCancel"), cropReset = $("cropReset"), cropApply = $("cropApply");
 
-  let activeFilter = "enhance";
+  $("verSplash").textContent = APP_VERSION;
+  $("verHome").textContent = APP_VERSION;
 
-  // ---------- OpenCV readiness ----------
-  function markReady() {
-    cvReady = true;
-    boot.classList.add("hide");
-    setTimeout(() => boot.remove(), 450);
+  // ---------- Splash → accueil ----------
+  function enterHome() {
+    const wait = Math.max(0, 2200 - (Date.now() - bootT0));
+    setTimeout(() => {
+      screenSplash.classList.add("hide");
+      setTimeout(() => { screenSplash.hidden = true; }, 500);
+      screenHome.hidden = false;
+    }, wait);
   }
+  function markReady() { cvReady = true; enterHome(); }
   if (cvReady) markReady();
   else {
     window.addEventListener("opencv-ready", markReady, { once: true });
     const poll = setInterval(() => {
-      if (window.__cvReady || (window.cv && cv.Mat)) { clearInterval(poll); markReady(); }
+      if (window.__cvReady || (window.cv && cv.Mat)) { clearInterval(poll); if (!cvReady) markReady(); }
     }, 300);
     setTimeout(() => {
-      if (!cvReady) bootText.textContent = "Le moteur met du temps à charger… vérifie ta connexion pour le premier lancement.";
-    }, 8000);
+      if (!cvReady) {
+        const sub = document.querySelector(".splash-sub");
+        if (sub) sub.textContent = "Le moteur met du temps à charger… vérifie ta connexion pour le premier lancement.";
+      }
+    }, 9000);
   }
+
+  // ---------- Navigation ----------
+  function showScreen(el) {
+    [screenSplash, screenHome, screenEdit].forEach(s => { s.hidden = (s !== el); });
+  }
+
+  function startMode(m) {
+    mode = m;
+    freeCurrent();
+    pages.length = 0;
+    queueStrip.textContent = "";
+    modeTitle.textContent = m === "single" ? "SCAN UNIQUE" : m === "batch" ? "SCAN LOT" : "OUVRIR IMAGE";
+    counter.hidden = (m !== "batch");
+    dockBatch.hidden = (m !== "batch");
+    dockSingle.hidden = (m === "batch");
+    queue.hidden = true;
+    resetPreview();
+    updateCounter();
+    // Ouvre la source dans le geste utilisateur
+    if (m === "open") { galleryInput.value = ""; galleryInput.click(); }
+    else { fileInput.value = ""; fileInput.click(); }
+  }
+  btnSingle.addEventListener("click", () => startMode("single"));
+  btnBatch.addEventListener("click", () => startMode("batch"));
+  btnOpen.addEventListener("click", () => startMode("open"));
+
+  function goHome() {
+    freeCurrent();
+    pages.length = 0;
+    queueStrip.textContent = "";
+    resetPreview();
+    showScreen(screenHome);
+    mode = null;
+  }
+  backBtn.addEventListener("click", () => {
+    if (mode === "batch" && pages.length > 0) {
+      if (!confirm("Abandonner le lot en cours ?")) return;
+    }
+    goHome();
+  });
 
   // ---------- Helpers ----------
   function showToast(msg, warn) {
@@ -62,7 +123,6 @@
     showToast._t = setTimeout(() => { toast.hidden = true; }, 2600);
   }
 
-  // Libère la mémoire bitmap d'un canvas (crucial sur mobile)
   function freeCanvas(c) {
     if (c && c.width) { c.width = 0; c.height = 0; }
   }
@@ -74,21 +134,21 @@
   }
 
   function updateCounter() {
-    counter.count.textContent = pages.length;
-    counter.plural.textContent = pages.length > 1 ? "s" : "";
-    exportBtn.disabled = pages.length === 0;
+    pageCount.textContent = pages.length;
+    plural.textContent = pages.length > 1 ? "s" : "";
+    finishBtn.disabled = pages.length === 0 && !current;
+    finishBtn.textContent = pages.length > 0 ? `Terminer (${pages.length})` : "Terminer";
     queue.hidden = pages.length === 0;
   }
 
-  // Charge un File dans un canvas correctement orienté (EXIF) et plafonné
   async function fileToCanvas(file) {
     let bmp;
     try {
       bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
     } catch {
-      bmp = await createImageBitmap(file); // navigateurs plus anciens
+      bmp = await createImageBitmap(file);
     }
-    const MAX = 2400; // grand côté ; bon compromis netteté texte / mémoire
+    const MAX = 2400;
     let { width: w, height: h } = bmp;
     const scale = Math.min(1, MAX / Math.max(w, h));
     w = Math.round(w * scale); h = Math.round(h * scale);
@@ -99,7 +159,6 @@
     return c;
   }
 
-  // Ordonne 4 points en [tl, tr, br, bl]
   function orderCorners(pts) {
     const bySum = [...pts].sort((a, b) => (a.x + a.y) - (b.x + b.y));
     const tl = bySum[0], br = bySum[3];
@@ -109,7 +168,7 @@
   }
   const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 
-  // Détecte le quadrilatère du document (sur copie réduite) → coins en coordonnées pleine résolution, ou null
+  // ---------- Détection / recadrage ----------
   function detectDocument(srcColor) {
     const long = Math.max(srcColor.cols, srcColor.rows);
     const procScale = Math.min(1, 800 / long);
@@ -157,7 +216,6 @@
     return corners;
   }
 
-  // Warp perspective du canvas source selon 4 coins → canvas redressé
   function warpWithCorners(srcCanvas, corners) {
     const src = cv.imread(srcCanvas);
     const out = document.createElement("canvas");
@@ -181,7 +239,6 @@
     return out;
   }
 
-  // Détection auto + recadrage. Retourne { canvas, corners|null, detected }
   function cropToDocument(srcCanvas) {
     const src = cv.imread(srcCanvas);
     let corners = null;
@@ -193,16 +250,15 @@
     if (corners) {
       return { canvas: warpWithCorners(srcCanvas, corners), corners, detected: true };
     }
-    // Pas de quadrilatère → image entière (le détourage manuel reste possible)
     const out = document.createElement("canvas");
     out.width = srcCanvas.width; out.height = srcCanvas.height;
     out.getContext("2d").drawImage(srcCanvas, 0, 0);
     return { canvas: out, corners: null, detected: false };
   }
 
-  // ---------- Moteur d'amélioration d'image ----------
-  // Estime le fond (éclairage) par flou massif sur copie réduite, puis divise :
-  // supprime ombres et jaunissement, fond uniforme. Technique « flat-field ».
+  // ---------- Moteur d'amélioration ----------
+  // Correction « flat-field » : divise par le fond estimé (flou massif sur copie réduite)
+  // → supprime ombres et jaunissement, fond uniforme.
   function flattenChannel(ch) {
     const small = new cv.Mat(), blurred = new cv.Mat(), bg = new cv.Mat(), out = new cv.Mat();
     try {
@@ -214,67 +270,98 @@
     } finally {
       small.delete(); blurred.delete(); bg.delete();
     }
-    return out; // à libérer par l'appelant
+    return out;
   }
 
-  // « Amélioré » : suppression d'ombres par canal + contraste + netteté (unsharp mask)
-  function enhanceColor(colorCanvas) {
-    const src = cv.imread(colorCanvas);
-    const rgb = new cv.Mat(), merged = new cv.Mat(), sharp = new cv.Mat(), blur2 = new cv.Mat();
-    const channels = new cv.MatVector(), flat = new cv.MatVector();
-    const out = document.createElement("canvas");
+  // « Amélioré » : flat-field par canal + netteté de base + contraste → Mat RGB
+  function enhanceMat(srcRGBA) {
+    const rgb = new cv.Mat(), merged = new cv.Mat();
+    const channels = new cv.MatVector(), flatv = new cv.MatVector();
+    const chRefs = [];
     try {
-      cv.cvtColor(src, rgb, cv.COLOR_RGBA2RGB);
+      cv.cvtColor(srcRGBA, rgb, cv.COLOR_RGBA2RGB);
       cv.split(rgb, channels);
-      for (let i = 0; i < 3; i++) flat.push_back(flattenChannel(channels.get(i)));
-      cv.merge(flat, merged);
-      // Netteté : unsharp mask doux (renforce les lettres sans halo)
-      cv.GaussianBlur(merged, blur2, new cv.Size(0, 0), 1.4);
-      cv.addWeighted(merged, 1.55, blur2, -0.55, 0, sharp);
-      // Léger boost de contraste
-      sharp.convertTo(sharp, -1, 1.08, -8);
-      out.width = colorCanvas.width; out.height = colorCanvas.height;
-      cv.imshow(out, sharp);
+      for (let i = 0; i < 3; i++) {
+        const ch = channels.get(i);
+        chRefs.push(ch);
+        flatv.push_back(flattenChannel(ch));
+      }
+      cv.merge(flatv, merged);
+      const blur = new cv.Mat();
+      cv.GaussianBlur(merged, blur, new cv.Size(0, 0), 1.4);
+      cv.addWeighted(merged, 1.5, blur, -0.5, 0, merged);
+      blur.delete();
+      merged.convertTo(merged, -1, 1.08, -8);
+      const out = merged.clone();
+      return out;
     } finally {
-      src.delete(); rgb.delete(); merged.delete(); sharp.delete(); blur2.delete();
-      for (let i = 0; i < channels.size(); i++) channels.get(i).delete();
-      for (let i = 0; i < flat.size(); i++) flat.get(i).delete();
-      channels.delete(); flat.delete();
+      rgb.delete(); merged.delete();
+      chRefs.forEach(m => m.delete());
+      for (let i = 0; i < flatv.size(); i++) flatv.get(i).delete();
+      channels.delete(); flatv.delete();
     }
-    return out;
   }
 
-  // Applique le filtre choisi à un canvas couleur recadré → canvas d'affichage
-  function applyFilter(colorCanvas, filter, block, c) {
-    if (filter === "color") return colorCanvas;
-    if (filter === "enhance") return enhanceColor(colorCanvas);
+  function getOpts() {
+    return {
+      block: +blockSize.value, c: +cValue.value,
+      bright: +brightness.value, contrast: +contrast.value, sharp: +sharpness.value
+    };
+  }
+
+  // Filtre + réglages qualité → canvas
+  function applyFilter(colorCanvas, filter, o) {
+    o = o || {};
+    const noAdj = !o.bright && !o.contrast && !o.sharp;
+    if (filter === "color" && noAdj) return colorCanvas;
 
     const src = cv.imread(colorCanvas);
-    const gray = new cv.Mat();
     const out = document.createElement("canvas");
+    out.width = colorCanvas.width; out.height = colorCanvas.height;
+    let mat = null;
     try {
-      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-      // Normalisation d'éclairage avant tout : gris propre, N&B sans pâtés d'ombre
-      const flat = flattenChannel(gray);
-      if (filter === "gray") {
-        flat.convertTo(flat, -1, 1.06, -6);
-        out.width = colorCanvas.width; out.height = colorCanvas.height;
-        cv.imshow(out, flat);
-      } else { // bw — seuillage adaptatif sur image normalisée
-        let b = block | 0; if (b < 3) b = 3; if (b % 2 === 0) b += 1;
-        const dst = new cv.Mat();
-        cv.adaptiveThreshold(flat, dst, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, b, c);
-        out.width = colorCanvas.width; out.height = colorCanvas.height;
-        cv.imshow(out, dst);
-        dst.delete();
+      if (filter === "bw") {
+        const gray = new cv.Mat();
+        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+        const flat = flattenChannel(gray);
+        gray.delete();
+        let b = o.block | 0; if (b < 3) b = 3; if (b % 2 === 0) b += 1;
+        mat = new cv.Mat();
+        cv.adaptiveThreshold(flat, mat, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, b, o.c);
+        flat.delete();
+      } else if (filter === "gray") {
+        const gray = new cv.Mat();
+        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+        mat = flattenChannel(gray);
+        gray.delete();
+        mat.convertTo(mat, -1, 1.06, -6);
+      } else if (filter === "enhance") {
+        mat = enhanceMat(src);
+      } else { // color
+        mat = new cv.Mat();
+        cv.cvtColor(src, mat, cv.COLOR_RGBA2RGB);
       }
-      flat.delete();
+      if (filter !== "bw") {
+        if (o.sharp > 0) {
+          const blur = new cv.Mat();
+          cv.GaussianBlur(mat, blur, new cv.Size(0, 0), 1.6);
+          const amt = (o.sharp / 100) * 1.1;
+          cv.addWeighted(mat, 1 + amt, blur, -amt, 0, mat);
+          blur.delete();
+        }
+        if (o.bright || o.contrast) {
+          mat.convertTo(mat, -1, 1 + (o.contrast || 0) / 100, o.bright || 0);
+        }
+      }
+      cv.imshow(out, mat);
     } finally {
-      src.delete(); gray.delete();
+      src.delete();
+      if (mat) mat.delete();
     }
     return out;
   }
 
+  // ---------- Preview ----------
   function drawPreview(canvas) {
     const ctx = previewCanvas.getContext("2d");
     previewCanvas.width = canvas.width;
@@ -284,18 +371,18 @@
     previewWrap.hidden = false;
     filters.hidden = false;
     editBar.hidden = false;
-    tuneToggle.hidden = (activeFilter !== "bw");
   }
 
   function renderCurrent() {
     if (!current) return;
-    const disp = applyFilter(current.color, current.filter, current.block, current.c);
+    const disp = applyFilter(current.color, activeFilter, getOpts());
     drawPreview(disp);
-    if (disp !== current.color) freeCanvas(disp); // le bitmap est copié dans previewCanvas
+    if (disp !== current.color) freeCanvas(disp);
   }
 
   function resetPreview() {
-    addBtn.disabled = true;
+    addPageBtn.disabled = true;
+    saveBtn.disabled = true;
     previewWrap.hidden = true;
     filters.hidden = true;
     editBar.hidden = true;
@@ -304,37 +391,26 @@
     freeCanvas(previewCanvas);
   }
 
-  // ---------- Capture / import ----------
-  captureBtn.addEventListener("click", () => {
-    if (!cvReady) { showToast("Le moteur de scan finit de charger…", true); return; }
-    fileInput.value = "";
-    fileInput.click();
-  });
-  importBtn.addEventListener("click", () => {
-    if (!cvReady) { showToast("Le moteur de scan finit de charger…", true); return; }
-    galleryInput.value = "";
-    galleryInput.click();
-  });
-
+  // ---------- Chargement d'une photo ----------
   async function handleFile(file) {
     if (!file) return;
+    showScreen(screenEdit);
     scanline.hidden = false;
     detectBadge.hidden = true;
     try {
-      freeCurrent(); // libère l'éventuelle page précédente non ajoutée
+      freeCurrent();
       const srcCanvas = await fileToCanvas(file);
-      await new Promise(r => setTimeout(r, 60)); // laisse la scanline s'animer
+      await new Promise(r => setTimeout(r, 60));
       const { canvas: cropped, corners, detected } = cropToDocument(srcCanvas);
-      current = {
-        src: srcCanvas, corners, color: cropped, detected,
-        filter: activeFilter, block: +blockSize.value, c: +cValue.value
-      };
+      current = { src: srcCanvas, corners, color: cropped, detected };
       renderCurrent();
       detectBadge.hidden = false;
       detectBadge.textContent = detected ? "Document détecté" : "Bords non trouvés — ajuste le cadre";
       detectBadge.className = "badge " + (detected ? "ok" : "warn");
-      addBtn.disabled = false;
-      if (!detected) showToast("Bords non détectés : utilise ⛶ Cadre pour ajuster manuellement.", true);
+      addPageBtn.disabled = false;
+      saveBtn.disabled = false;
+      finishBtn.disabled = pages.length === 0 && !current;
+      if (!detected) showToast("Bords non détectés : utilise ⛶ Cadre pour ajuster.", true);
     } catch (err) {
       console.error(err);
       showToast("Impossible de traiter cette image.", true);
@@ -344,6 +420,11 @@
   }
   fileInput.addEventListener("change", () => handleFile(fileInput.files && fileInput.files[0]));
   galleryInput.addEventListener("change", () => handleFile(galleryInput.files && galleryInput.files[0]));
+
+  retakeBtn.addEventListener("click", () => {
+    if (mode === "open") { galleryInput.value = ""; galleryInput.click(); }
+    else { fileInput.value = ""; fileInput.click(); }
+  });
 
   // ---------- Rotation 90° ----------
   function rotateCanvas(c, cw) {
@@ -374,7 +455,7 @@
   rotLeftBtn.addEventListener("click", () => rotateCurrent(false));
   rotRightBtn.addEventListener("click", () => rotateCurrent(true));
 
-  // ---------- Éditeur de détourage manuel (4 points) ----------
+  // ---------- Détourage manuel 4 points ----------
   const cropUI = { corners: [], scale: 1, ox: 0, oy: 0, dragIdx: -1, dpr: 1 };
 
   function defaultCorners() {
@@ -386,7 +467,6 @@
   function openCropEditor() {
     if (!current) return;
     cropEditor.hidden = false;
-    // Attend que l'overlay soit rendu pour mesurer la zone
     requestAnimationFrame(() => {
       const rect = cropStage.getBoundingClientRect();
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -417,9 +497,7 @@
     const dpr = cropUI.dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cropCanvas.width, cropCanvas.height);
-    // Image
     ctx.drawImage(current.src, cropUI.ox, cropUI.oy, current.src.width * cropUI.scale, current.src.height * cropUI.scale);
-    // Assombrit l'extérieur du quadrilatère
     const pts = cropUI.corners.map(toScreen);
     ctx.save();
     ctx.fillStyle = "rgba(10,14,20,0.55)";
@@ -430,7 +508,6 @@
     ctx.closePath();
     ctx.fill("evenodd");
     ctx.restore();
-    // Contour
     ctx.strokeStyle = "#35D0BA";
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -438,7 +515,6 @@
     for (let i = 1; i < 4; i++) ctx.lineTo(pts[i].x, pts[i].y);
     ctx.closePath();
     ctx.stroke();
-    // Poignées
     pts.forEach((p, i) => {
       ctx.beginPath();
       ctx.arc(p.x, p.y, i === cropUI.dragIdx ? 13 : 10, 0, Math.PI * 2);
@@ -464,14 +540,12 @@
     const half = R / (2 * Z);
     ctx.drawImage(current.src, p.x - half, p.y - half, R / Z, R / Z, 0, 0, R, R);
     ctx.restore();
-    // Croix de visée
     ctx.strokeStyle = "#E0685B";
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(R / 2 - 12, R / 2); ctx.lineTo(R / 2 + 12, R / 2);
     ctx.moveTo(R / 2, R / 2 - 12); ctx.lineTo(R / 2, R / 2 + 12);
     ctx.stroke();
-    // Place la loupe du côté opposé au doigt
     const sp = toScreen(p);
     const rect = cropStage.getBoundingClientRect();
     loupeCanvas.classList.toggle("right", sp.x < rect.width / 2);
@@ -486,7 +560,7 @@
   cropStage.addEventListener("pointerdown", (ev) => {
     if (cropEditor.hidden || !current) return;
     const pos = stagePos(ev);
-    let best = -1, bestD = 44; // rayon de prise généreux (tactile)
+    let best = -1, bestD = 44;
     cropUI.corners.forEach((c, i) => {
       const s = toScreen(c);
       const d = Math.hypot(s.x - pos.x, s.y - pos.y);
@@ -509,7 +583,7 @@
   function endDrag() {
     cropUI.dragIdx = -1;
     loupeCanvas.hidden = true;
-    drawCropUI();
+    if (!cropEditor.hidden && current) drawCropUI();
   }
   cropStage.addEventListener("pointerup", endDrag);
   cropStage.addEventListener("pointercancel", endDrag);
@@ -523,7 +597,7 @@
   cropBtn.addEventListener("click", openCropEditor);
   cropCancel.addEventListener("click", closeCropEditor);
   cropReset.addEventListener("click", () => {
-    // Relance la détection auto ; sinon rectangle par défaut
+    if (!current) return;
     let corners = null;
     const src = cv.imread(current.src);
     try { corners = detectDocument(src); } finally { src.delete(); }
@@ -545,56 +619,40 @@
     detectBadge.className = "badge ok";
   });
 
-  // ---------- Contrôles de filtre ----------
-  document.querySelectorAll(".seg-btn").forEach(btn => {
+  // ---------- Filtres + réglages ----------
+  function updateTuneRows() {
+    const bw = (activeFilter === "bw");
+    rowBright.hidden = bw;
+    rowContrast.hidden = bw;
+    rowSharp.hidden = bw;
+    rowBlock.hidden = !bw;
+    rowC.hidden = !bw;
+  }
+  document.querySelectorAll(".seg-btn[data-filter]").forEach(btn => {
     btn.addEventListener("click", () => {
-      document.querySelectorAll(".seg-btn").forEach(b => { b.classList.remove("is-active"); b.removeAttribute("aria-selected"); });
+      document.querySelectorAll(".seg-btn[data-filter]").forEach(b => { b.classList.remove("is-active"); b.removeAttribute("aria-selected"); });
       btn.classList.add("is-active"); btn.setAttribute("aria-selected", "true");
       activeFilter = btn.dataset.filter;
-      tuneToggle.hidden = (activeFilter !== "bw");
-      if (activeFilter !== "bw") tunePanel.hidden = true;
-      if (current) { current.filter = activeFilter; renderCurrent(); }
+      updateTuneRows();
+      renderCurrent();
     });
   });
-
-  tuneToggle.addEventListener("click", () => { tunePanel.hidden = !tunePanel.hidden; });
+  tuneToggle.addEventListener("click", () => { tunePanel.hidden = !tunePanel.hidden; updateTuneRows(); });
 
   let tuneRaf = 0;
   function onTune() {
+    brightVal.textContent = brightness.value;
+    contrastVal.textContent = contrast.value;
+    sharpVal.textContent = sharpness.value;
     blockVal.textContent = blockSize.value;
     cVal.textContent = cValue.value;
-    if (current && current.filter === "bw" && !tuneRaf) {
-      tuneRaf = requestAnimationFrame(() => {
-        tuneRaf = 0;
-        current.block = +blockSize.value;
-        current.c = +cValue.value;
-        renderCurrent();
-      });
+    if (current && !tuneRaf) {
+      tuneRaf = requestAnimationFrame(() => { tuneRaf = 0; renderCurrent(); });
     }
   }
-  blockSize.addEventListener("input", onTune);
-  cValue.addEventListener("input", onTune);
+  [brightness, contrast, sharpness, blockSize, cValue].forEach(el => el.addEventListener("input", onTune));
 
-  // ---------- File de pages ----------
-  addBtn.addEventListener("click", () => {
-    if (!current) return;
-    const final = applyFilter(current.color, current.filter, current.block, current.c);
-    const mime = current.filter === "bw" ? "image/png" : "image/jpeg";
-    const page = {
-      mime,
-      w: final.width, h: final.height,
-      dataUrl: final.toDataURL(mime, 0.9),
-      thumbUrl: makeThumb(final)
-    };
-    if (final !== current.color) freeCanvas(final);
-    freeCurrent(); // libère src + color : la page vit en compressé uniquement
-    pages.push(page);
-    addThumb(page);
-    updateCounter();
-    showToast("Page ajoutée (" + pages.length + ")");
-    resetPreview();
-  });
-
+  // ---------- Lot : pages ----------
   function makeThumb(canvas) {
     const t = document.createElement("canvas");
     const s = 144 / Math.max(canvas.width, canvas.height);
@@ -605,6 +663,34 @@
     freeCanvas(t);
     return url;
   }
+
+  function commitCurrentToPages() {
+    if (!current) return false;
+    const final = applyFilter(current.color, activeFilter, getOpts());
+    const mime = activeFilter === "bw" ? "image/png" : "image/jpeg";
+    const page = {
+      mime,
+      w: final.width, h: final.height,
+      dataUrl: final.toDataURL(mime, 0.92),
+      thumbUrl: makeThumb(final)
+    };
+    if (final !== current.color) freeCanvas(final);
+    freeCurrent();
+    pages.push(page);
+    addThumb(page);
+    updateCounter();
+    resetPreview();
+    return true;
+  }
+
+  addPageBtn.addEventListener("click", () => {
+    if (!current) return;
+    commitCurrentToPages();
+    showToast("Page ajoutée (" + pages.length + ")");
+    // Enchaîne sur la photo suivante (dans le geste utilisateur)
+    fileInput.value = "";
+    fileInput.click();
+  });
 
   function addThumb(page) {
     const el = document.createElement("div");
@@ -637,34 +723,98 @@
     pages.length = 0;
     queueStrip.textContent = "";
     updateCounter();
-    showToast("Pages effacées — mémoire libérée");
+    showToast("Pages effacées");
   });
 
-  // ---------- Export PDF ----------
-  exportBtn.addEventListener("click", () => {
-    if (!pages.length) return;
-    const { jsPDF } = window.jspdf;
+  // ---------- Boîte d'enregistrement ----------
+  const QUALITY = {
+    compact:  { scale: 0.75, jpeg: 0.72, hint: "Fichier léger, idéal pour l'envoi par mail" },
+    standard: { scale: 1,    jpeg: 0.88, hint: "Bon équilibre poids / netteté" },
+    high:     { scale: 1,    jpeg: 0.95, hint: "Netteté maximale, fichier plus lourd" }
+  };
+
+  function defaultName() {
     const stamp = new Date().toISOString().slice(0, 10);
+    return (mode === "batch" ? "scan-lot-" : "scan-") + stamp;
+  }
 
-    try {
-      if (splitToggle.checked) {
-        pages.forEach((p, i) => {
-          const doc = buildDoc(jsPDF, [p]);
-          doc.save(`scan-${stamp}-${String(i + 1).padStart(2, "0")}.pdf`);
-        });
-        showToast(pages.length + " fichiers PDF générés");
-      } else {
-        const doc = buildDoc(jsPDF, pages);
-        doc.save(`scan-${stamp}.pdf`);
-        showToast("PDF créé (" + pages.length + " page" + (pages.length > 1 ? "s" : "") + ")");
-      }
-    } catch (err) {
-      console.error(err);
-      showToast("Échec de la création du PDF.", true);
-    }
+  function openSaveSheet() {
+    fileName.value = defaultName();
+    saveSheet.hidden = false;
+  }
+  saveCancel.addEventListener("click", () => { saveSheet.hidden = true; });
+
+  document.querySelectorAll(".seg-btn[data-q]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".seg-btn[data-q]").forEach(b => { b.classList.remove("is-active"); b.removeAttribute("aria-selected"); });
+      btn.classList.add("is-active"); btn.setAttribute("aria-selected", "true");
+      quality = btn.dataset.q;
+      qualityHint.textContent = QUALITY[quality].hint;
+    });
   });
 
-  // Construit le document jsPDF depuis les images compressées (aucun re-traitement)
+  saveBtn.addEventListener("click", () => { if (current) openSaveSheet(); });
+  finishBtn.addEventListener("click", () => {
+    if (current) { commitCurrentToPages(); showToast("Page ajoutée (" + pages.length + ")"); }
+    if (!pages.length) return;
+    openSaveSheet();
+  });
+
+  function sanitizeName(raw) {
+    const n = (raw || "").trim().replace(/[\\/:*?"<>|]+/g, "-").replace(/\.pdf$/i, "");
+    return n || defaultName();
+  }
+
+  function scaleCanvasFrom(imgOrCanvas, w, h, scale) {
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(w * scale));
+    c.height = Math.max(1, Math.round(h * scale));
+    c.getContext("2d").drawImage(imgOrCanvas, 0, 0, c.width, c.height);
+    return c;
+  }
+
+  // Ré-encode une page stockée selon la qualité (séquentiel, mémoire maîtrisée)
+  function transcodePage(page, q) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const c = scaleCanvasFrom(img, page.w, page.h, q.scale);
+        const out = {
+          mime: page.mime, w: c.width, h: c.height,
+          dataUrl: page.mime === "image/png" ? c.toDataURL("image/png") : c.toDataURL("image/jpeg", q.jpeg)
+        };
+        freeCanvas(c);
+        resolve(out);
+      };
+      img.onerror = reject;
+      img.src = page.dataUrl;
+    });
+  }
+
+  async function collectPagesForExport() {
+    const q = QUALITY[quality];
+    if (mode === "batch") {
+      if (q.scale === 1 && quality !== "compact") return pages; // stockées à 0.92, très proche
+      const list = [];
+      for (const p of pages) list.push(await transcodePage(p, q));
+      return list;
+    }
+    // single / open : rendu direct depuis current à la qualité choisie
+    let final = applyFilter(current.color, activeFilter, getOpts());
+    let outC = final;
+    if (q.scale !== 1) {
+      outC = scaleCanvasFrom(final, final.width, final.height, q.scale);
+      if (final !== current.color) freeCanvas(final);
+    }
+    const mime = activeFilter === "bw" ? "image/png" : "image/jpeg";
+    const page = {
+      mime, w: outC.width, h: outC.height,
+      dataUrl: mime === "image/png" ? outC.toDataURL("image/png") : outC.toDataURL("image/jpeg", q.jpeg)
+    };
+    if (outC !== current.color) freeCanvas(outC);
+    return [page];
+  }
+
   function buildDoc(jsPDF, pageList) {
     let doc = null;
     pageList.forEach((p, i) => {
@@ -679,7 +829,55 @@
     return doc;
   }
 
-  // ---------- PWA service worker ----------
+  function finishSession(msg) {
+    saveSheet.hidden = true;
+    goHome();
+    showToast(msg);
+  }
+
+  downloadBtn.addEventListener("click", async () => {
+    try {
+      downloadBtn.disabled = true;
+      const name = sanitizeName(fileName.value);
+      const { jsPDF } = window.jspdf;
+      const list = await collectPagesForExport();
+      const doc = buildDoc(jsPDF, list);
+      doc.save(name + ".pdf");
+      finishSession("PDF enregistré : " + name + ".pdf");
+    } catch (err) {
+      console.error(err);
+      showToast("Échec de la création du PDF.", true);
+    } finally {
+      downloadBtn.disabled = false;
+    }
+  });
+
+  shareBtn.addEventListener("click", async () => {
+    try {
+      shareBtn.disabled = true;
+      const name = sanitizeName(fileName.value);
+      const { jsPDF } = window.jspdf;
+      const list = await collectPagesForExport();
+      const doc = buildDoc(jsPDF, list);
+      const blob = doc.output("blob");
+      const file = new File([blob], name + ".pdf", { type: "application/pdf" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: name });
+        finishSession("Document transféré");
+      } else {
+        doc.save(name + ".pdf");
+        finishSession("Partage non disponible ici — PDF téléchargé");
+      }
+    } catch (err) {
+      if (err && err.name === "AbortError") { shareBtn.disabled = false; return; } // partage annulé
+      console.error(err);
+      showToast("Échec du transfert.", true);
+    } finally {
+      shareBtn.disabled = false;
+    }
+  });
+
+  // ---------- PWA ----------
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
       navigator.serviceWorker.register("sw.js").catch(() => {});
@@ -688,4 +886,3 @@
 
   updateCounter();
 })();
-/* v3 */

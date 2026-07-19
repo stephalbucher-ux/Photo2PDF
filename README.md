@@ -1,65 +1,51 @@
-# Scanorama — Scanner de documents (PWA)
+# PHOTO 2 PDF — Scanner de documents (PWA)
 
-Photo → PDF net. Recadrage automatique du document + filtres. Sortie en **PDF multipage** ou **un fichier par page**. S'installe sur Android comme une vraie application (icône, plein écran, hors-ligne).
+© SA IA — **v4.0**
 
-## Nouveautés (v3)
+Numérisez vos documents texte en PDF nets, depuis l'appareil photo ou la galerie. S'installe sur Android comme une vraie application (icône, plein écran, hors-ligne).
 
-- **Importer** : ouvre une photo existante de la galerie (JPG, JPEG, PNG, WebP…) en plus de la capture caméra.
-- **Rotation** : boutons ⟲ / ⟳ sur l'aperçu (90° par appui).
-- **Détourage manuel 4 points** : bouton **⛶ Cadre** → déplace les 4 coins sur les bords du document (avec loupe de précision), Valider redresse la perspective. « Auto » relance la détection.
-- **Filtre « Amélioré »** (par défaut) : suppression des ombres et du jaunissement (correction *flat-field* : division par le fond estimé), contraste et netteté (*unsharp mask*). Idéal pour un beau rendu de document texte. Le N&B et le Gris profitent aussi de la normalisation d'éclairage.
-- **Mémoire mobile corrigée** : les pages ajoutées sont stockées compressées (JPEG/PNG) et plus en bitmaps pleine résolution ; tous les canvas intermédiaires sont libérés. Bouton **Tout effacer** pour vider la file. Cela corrige les blocages à la 2ᵉ utilisation sur téléphone.
+**Appli en ligne :** https://stephalbucher-ux.github.io/Photo2PDF/
+
+## Architecture (v4)
+
+1. **Page d'ouverture** : logo PHOTO 2 PDF, copyright SA IA + version, transition automatique (~2 s, le temps de charger le moteur).
+2. **Accueil** : logo en haut à gauche + 3 boutons —
+   - **SCAN UNIQUE** : une photo → un PDF d'une page.
+   - **SCAN LOT** : plusieurs photos à la suite → un seul PDF multipage (file de pages avec miniatures, suppression, tout effacer).
+   - **OUVRIR IMAGE** : une photo existante de la galerie (JPG, JPEG, PNG, WebP…) → mêmes possibilités.
+3. **Édition** (commune aux 3 modes) :
+   - Recadrage : détection automatique des bords + **détourage manuel 4 points** (⛶ Cadre, avec loupe de précision).
+   - **Rotation** ⟲ / ⟳ par pas de 90°.
+   - Filtres : **Couleur**, **Amélioré** (suppression d'ombres *flat-field* + netteté, par défaut), **Gris**, **N&B** (binarisation par seuillage adaptatif).
+   - Réglages qualité : luminosité, contraste, netteté (modes couleur/amélioré/gris) ; finesse et seuil (mode N&B).
+4. **Enregistrer** : renommage du fichier, qualité du PDF (Compact / Standard / Haute), **Enregistrer** (téléchargement) ou **Transférer** (menu de partage du téléphone : mail, WhatsApp, Drive…).
 
 ## Table des fichiers
 
 | Fichier | Rôle |
 |---|---|
-| `index.html` | Page unique de l'appli (structure) |
-| `style.css` | Style (thème sombre « viseur » + barre de scan teal) |
-| `app.js` | Moteur : détection auto, recadrage perspective, seuillage adaptatif, file de pages, export PDF |
-| `manifest.webmanifest` | Déclaration PWA (nom, icônes, mode plein écran) |
-| `sw.js` | Service worker : cache l'appli + les librairies pour le hors-ligne |
+| `index.html` | Écrans (splash, accueil, édition, enregistrement, détourage) |
+| `style.css` | Style (thème sombre « viseur » + teal) |
+| `app.js` | Moteur : navigation, détection, détourage, filtres, réglages, export/partage PDF |
+| `manifest.webmanifest` | Déclaration PWA |
+| `sw.js` | Service worker : cache hors-ligne (`photo2pdf-v4`) |
 | `icons/` | Icônes 192 / 512 / maskable / favicon |
+| `opencv.js` | OpenCV.js auto-hébergé |
 
-Les librairies **OpenCV.js** et **jsPDF** sont chargées depuis un CDN au premier lancement, puis mises en cache par le service worker pour fonctionner ensuite hors-ligne.
+jsPDF est chargé depuis un CDN au premier lancement puis mis en cache.
 
-## Important : contexte sécurisé (HTTPS)
+## Gestion mémoire mobile
 
-Le service worker, l'installation PWA et l'accès caméra exigent **HTTPS** (ou `localhost`). Un hébergement type **Vercel** fournit le HTTPS automatiquement — c'est le plus simple, comme pour My Prono Family.
+Les pages du lot sont stockées **compressées** (JPEG/PNG dataURL), jamais en bitmaps pleine résolution. Tous les canvas intermédiaires et les `cv.Mat` sont libérés immédiatement. La résolution de travail est plafonnée à 2400 px de grand côté.
 
-## Déploiement Vercel (recommandé)
+## Déploiement
 
-```powershell
-# Depuis le dossier décompressé
-cd .\scanorama
-npm i -g vercel      # si pas déjà installé
-vercel               # suivre les invites → URL en https://
-vercel --prod        # mise en production
-```
+Hébergé sur **GitHub Pages** (dépôt `stephalbucher-ux/Photo2PDF`, branche `main`). Chaque commit sur `main` redéploie automatiquement. À chaque mise en ligne, incrémenter `CACHE` dans `sw.js` et `APP_VERSION` dans `app.js` pour forcer la mise à jour chez les utilisateurs (fermer/rouvrir l'appli 2×).
 
-Puis, sur ton Android : ouvre l'URL dans Chrome → menu ⋮ → **Ajouter à l'écran d'accueil / Installer l'application**.
-
-## Test rapide en local (sur ton PC)
+## Test local
 
 ```powershell
-cd .\scanorama
+cd C:\Appli\Photo2PDF
 npx serve -l 3000    # ou : python -m http.server 3000
-# Ouvre http://localhost:3000 dans Chrome (localhost = contexte sécurisé)
+# http://localhost:3000 dans Chrome
 ```
-
-Pour tester depuis le téléphone, le plus simple reste de déployer sur Vercel et d'ouvrir l'URL https.
-
-## Comment ça marche
-
-1. **Capturer** ouvre l'appareil photo (ou la galerie). La photo est redressée selon son orientation EXIF.
-2. Le moteur cherche le plus grand quadrilatère du document (Canny + contours), corrige la perspective et recadre en pleine résolution.
-3. Le filtre s'applique : **Couleur**, **Gris**, ou **N&B** (seuillage adaptatif). Les réglages *Finesse* (taille de bloc) et *Seuil* (constante C) affinent le rendu N&B.
-4. **Ajouter** empile la page. **Créer le PDF** assemble tout en un PDF multipage — ou un fichier par page si la case est cochée.
-
-Si les bords ne sont pas détectés (fond peu contrasté), l'appli garde l'image entière et te prévient : pose le document sur une surface de couleur différente.
-
-## Réglage du seuillage adaptatif
-
-Dans `app.js`, fonction `applyFilter`, appel `cv.adaptiveThreshold(gray, dst, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, b, c)` :
-- `b` (Finesse) : taille de la fenêtre locale, impair. Petit = plus de détail/bruit ; grand = plus lisse.
-- `c` (Seuil) : soustraction ; augmente pour éclaircir le fond, diminue pour renforcer le texte.

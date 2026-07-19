@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
 <meta name="theme-color" content="#14181F">
-<title>Scanorama — Photo → PDF net</title>
+<title>PHOTO 2 PDF — Scanner de documents</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/favicon-64.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -16,91 +16,174 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+
+<!-- ============ Logo (symbole SVG réutilisable) ============ -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <g id="logoMark">
+      <!-- feuille -->
+      <path d="M14 6 h26 l12 12 v40 a4 4 0 0 1 -4 4 h-34 a4 4 0 0 1 -4 -4 v-48 a4 4 0 0 1 4 -4 z" fill="#F5F3EC"/>
+      <!-- coin plié -->
+      <path d="M40 6 l12 12 h-10 a2 2 0 0 1 -2 -2 z" fill="#C9C4B4"/>
+      <!-- lignes de texte -->
+      <rect x="17" y="26" width="26" height="3" rx="1.5" fill="#8A93A0"/>
+      <rect x="17" y="33" width="20" height="3" rx="1.5" fill="#8A93A0"/>
+      <!-- ligne de scan -->
+      <rect x="12" y="41" width="42" height="4" rx="2" fill="#35D0BA"/>
+      <!-- badge PDF -->
+      <rect x="26" y="49" width="30" height="16" rx="4" fill="#E0685B"/>
+      <text x="41" y="61" text-anchor="middle" font-family="Space Grotesk,system-ui,sans-serif" font-size="11" font-weight="700" fill="#fff">PDF</text>
+    </g>
+  </defs>
+</svg>
+
 <div id="app">
 
-  <header class="topbar">
-    <div class="brand">
-      <span class="brand-mark" aria-hidden="true"></span>
-      <span class="brand-name">Scanorama</span>
+  <!-- ============ 1. SPLASH ============ -->
+  <section class="screen splash" id="screenSplash">
+    <div class="splash-center">
+      <svg class="splash-logo" viewBox="0 0 68 72" aria-hidden="true"><use href="#logoMark"/></svg>
+      <h1 class="splash-title">PHOTO <span class="accent">2</span> PDF</h1>
+      <p class="splash-sub">Numérisez vos documents en PDF nets</p>
+      <div class="splash-load" id="splashLoad"><span></span></div>
     </div>
-    <div class="counter" id="counter"><span id="pageCount">0</span> page<span id="plural"></span></div>
-  </header>
+    <footer class="splash-footer">
+      <span>© 2026 <strong>SA&nbsp;IA</strong> — version <span id="verSplash"></span></span>
+    </footer>
+  </section>
 
-  <main class="stage">
-    <!-- Preview surface -->
-    <section class="viewer" id="viewer">
-      <div class="empty" id="emptyState">
-        <div class="empty-icon" aria-hidden="true"></div>
-        <p class="empty-title">Aucun document</p>
-        <p class="empty-sub">Prends une photo d'un document. Le cadrage et le filtre se font tout seuls.</p>
-      </div>
-      <div class="preview-wrap" id="previewWrap" hidden>
-        <canvas id="previewCanvas"></canvas>
-        <div class="scanline" id="scanline" hidden></div>
-      </div>
-      <div class="badge" id="detectBadge" hidden></div>
-      <div class="editbar" id="editBar" hidden>
-        <button class="tool" id="rotLeftBtn" aria-label="Rotation à gauche">⟲</button>
-        <button class="tool" id="rotRightBtn" aria-label="Rotation à droite">⟳</button>
-        <button class="tool tool-wide" id="cropBtn">⛶ Cadre</button>
-      </div>
-    </section>
-
-    <!-- Filter control -->
-    <section class="filters" id="filters" hidden>
-      <div class="seg seg-4" role="tablist" aria-label="Filtre">
-        <button class="seg-btn" data-filter="color" role="tab">Couleur</button>
-        <button class="seg-btn is-active" data-filter="enhance" role="tab" aria-selected="true">Amélioré</button>
-        <button class="seg-btn" data-filter="gray" role="tab">Gris</button>
-        <button class="seg-btn" data-filter="bw" role="tab">N&amp;B</button>
-      </div>
-      <button class="tune-toggle" id="tuneToggle" hidden>Réglages N&amp;B</button>
-      <div class="tune" id="tunePanel" hidden>
-        <label class="tune-row">
-          <span>Finesse <em id="blockVal">25</em></span>
-          <input type="range" id="blockSize" min="3" max="61" step="2" value="25">
-        </label>
-        <label class="tune-row">
-          <span>Seuil <em id="cVal">10</em></span>
-          <input type="range" id="cValue" min="-10" max="30" step="1" value="10">
-        </label>
-      </div>
-    </section>
-
-    <!-- Page queue -->
-    <section class="queue" id="queue" hidden>
-      <div class="queue-head">
-        <span class="queue-title">Pages</span>
-        <button class="clear-all" id="clearBtn">Tout effacer</button>
-      </div>
-      <div class="queue-strip" id="queueStrip"></div>
-    </section>
-  </main>
-
-  <footer class="dock">
-    <div class="dock-row">
-      <button class="btn btn-primary" id="captureBtn">
-        <span class="btn-ic" aria-hidden="true">◉</span> Capturer
+  <!-- ============ 2. ACCUEIL ============ -->
+  <section class="screen home" id="screenHome" hidden>
+    <header class="home-head">
+      <svg class="home-logo" viewBox="0 0 68 72" aria-hidden="true"><use href="#logoMark"/></svg>
+      <span class="home-name">PHOTO <span class="accent">2</span> PDF</span>
+    </header>
+    <div class="home-menu">
+      <button class="menu-btn" id="btnSingle">
+        <span class="menu-ic">◉</span>
+        <span class="menu-txt"><strong>SCAN UNIQUE</strong><small>Une photo → un PDF d'une page</small></span>
       </button>
-      <button class="btn btn-ghost" id="importBtn">
-        <span class="btn-ic" aria-hidden="true">🖼</span> Importer
+      <button class="menu-btn" id="btnBatch">
+        <span class="menu-ic">⧉</span>
+        <span class="menu-txt"><strong>SCAN LOT</strong><small>Plusieurs pages → un PDF multipage</small></span>
+      </button>
+      <button class="menu-btn" id="btnOpen">
+        <span class="menu-ic">🖼</span>
+        <span class="menu-txt"><strong>OUVRIR IMAGE</strong><small>Une photo de la galerie → un PDF</small></span>
       </button>
     </div>
-    <div class="dock-row">
-      <button class="btn btn-ghost" id="addBtn" disabled>
-        <span class="btn-ic" aria-hidden="true">＋</span> Ajouter
-      </button>
-      <button class="btn btn-accent" id="exportBtn" disabled>Créer le PDF</button>
-    </div>
-    <label class="split-opt">
-      <input type="checkbox" id="splitToggle">
-      <span>Un fichier PDF par page</span>
-    </label>
-    <input type="file" id="fileInput" accept="image/*" capture="environment" hidden>
-    <input type="file" id="galleryInput" accept="image/jpeg,image/png,image/webp,image/*" hidden>
-  </footer>
+    <footer class="home-footer">© 2026 SA&nbsp;IA — v<span id="verHome"></span></footer>
+  </section>
 
-  <!-- Manual 4-point crop editor -->
+  <!-- ============ 3. ÉDITION ============ -->
+  <section class="screen edit" id="screenEdit" hidden>
+    <header class="topbar">
+      <button class="back" id="backBtn" aria-label="Retour">‹</button>
+      <div class="brand">
+        <svg class="brand-logo" viewBox="0 0 68 72" aria-hidden="true"><use href="#logoMark"/></svg>
+        <span class="brand-name" id="modeTitle">Scan</span>
+      </div>
+      <div class="counter" id="counter" hidden><span id="pageCount">0</span> page<span id="plural"></span></div>
+    </header>
+
+    <main class="stage">
+      <section class="viewer" id="viewer">
+        <div class="empty" id="emptyState">
+          <div class="empty-icon" aria-hidden="true"></div>
+          <p class="empty-title">Aucun document</p>
+          <p class="empty-sub">Prends une photo d'un document. Le cadrage et le filtre se font tout seuls.</p>
+        </div>
+        <div class="preview-wrap" id="previewWrap" hidden>
+          <canvas id="previewCanvas"></canvas>
+          <div class="scanline" id="scanline" hidden></div>
+        </div>
+        <div class="badge" id="detectBadge" hidden></div>
+        <div class="editbar" id="editBar" hidden>
+          <button class="tool" id="rotLeftBtn" aria-label="Rotation à gauche">⟲</button>
+          <button class="tool" id="rotRightBtn" aria-label="Rotation à droite">⟳</button>
+          <button class="tool tool-wide" id="cropBtn">⛶ Cadre</button>
+        </div>
+      </section>
+
+      <section class="filters" id="filters" hidden>
+        <div class="seg seg-4" role="tablist" aria-label="Filtre">
+          <button class="seg-btn" data-filter="color" role="tab">Couleur</button>
+          <button class="seg-btn is-active" data-filter="enhance" role="tab" aria-selected="true">Amélioré</button>
+          <button class="seg-btn" data-filter="gray" role="tab">Gris</button>
+          <button class="seg-btn" data-filter="bw" role="tab">N&amp;B</button>
+        </div>
+        <button class="tune-toggle" id="tuneToggle">Réglages qualité</button>
+        <div class="tune" id="tunePanel" hidden>
+          <label class="tune-row" id="rowBright">
+            <span>Luminosité <em id="brightVal">0</em></span>
+            <input type="range" id="brightness" min="-60" max="60" step="1" value="0">
+          </label>
+          <label class="tune-row" id="rowContrast">
+            <span>Contraste <em id="contrastVal">0</em></span>
+            <input type="range" id="contrast" min="-50" max="50" step="1" value="0">
+          </label>
+          <label class="tune-row" id="rowSharp">
+            <span>Netteté <em id="sharpVal">0</em></span>
+            <input type="range" id="sharpness" min="0" max="100" step="1" value="0">
+          </label>
+          <label class="tune-row" id="rowBlock" hidden>
+            <span>Finesse N&amp;B <em id="blockVal">25</em></span>
+            <input type="range" id="blockSize" min="3" max="61" step="2" value="25">
+          </label>
+          <label class="tune-row" id="rowC" hidden>
+            <span>Seuil N&amp;B <em id="cVal">10</em></span>
+            <input type="range" id="cValue" min="-10" max="30" step="1" value="10">
+          </label>
+        </div>
+      </section>
+
+      <section class="queue" id="queue" hidden>
+        <div class="queue-head">
+          <span class="queue-title">Pages du lot</span>
+          <button class="clear-all" id="clearBtn">Tout effacer</button>
+        </div>
+        <div class="queue-strip" id="queueStrip"></div>
+      </section>
+    </main>
+
+    <footer class="dock">
+      <div class="dock-row" id="dockBatch" hidden>
+        <button class="btn btn-primary" id="addPageBtn" disabled>＋ Ajouter la page</button>
+        <button class="btn btn-accent" id="finishBtn" disabled>Terminer</button>
+      </div>
+      <div class="dock-row" id="dockSingle" hidden>
+        <button class="btn btn-ghost" id="retakeBtn">↺ Reprendre</button>
+        <button class="btn btn-accent" id="saveBtn" disabled>💾 Enregistrer</button>
+      </div>
+    </footer>
+  </section>
+
+  <!-- ============ Boîte d'enregistrement ============ -->
+  <div class="sheet-backdrop" id="saveSheet" hidden>
+    <div class="sheet">
+      <h2 class="sheet-title">Enregistrer le document</h2>
+      <label class="sheet-label">Nom du fichier
+        <div class="name-row">
+          <input type="text" id="fileName" autocomplete="off" spellcheck="false">
+          <span class="ext">.pdf</span>
+        </div>
+      </label>
+      <label class="sheet-label">Qualité du PDF</label>
+      <div class="seg seg-3" role="tablist" aria-label="Qualité">
+        <button class="seg-btn" data-q="compact" role="tab">Compact</button>
+        <button class="seg-btn is-active" data-q="standard" role="tab" aria-selected="true">Standard</button>
+        <button class="seg-btn" data-q="high" role="tab">Haute</button>
+      </div>
+      <p class="sheet-hint" id="qualityHint">Bon équilibre poids / netteté</p>
+      <div class="sheet-actions">
+        <button class="btn btn-accent" id="downloadBtn">💾 Enregistrer</button>
+        <button class="btn btn-primary" id="shareBtn">📤 Transférer</button>
+      </div>
+      <button class="sheet-cancel" id="saveCancel">Annuler</button>
+    </div>
+  </div>
+
+  <!-- ============ Détourage manuel 4 points ============ -->
   <div class="crop" id="cropEditor" hidden>
     <div class="crop-stage" id="cropStage">
       <canvas id="cropCanvas"></canvas>
@@ -114,20 +197,17 @@
     </div>
   </div>
 
-  <!-- Boot / loading overlay -->
-  <div class="boot" id="boot">
-    <div class="boot-mark"></div>
-    <p class="boot-text" id="bootText">Préparation du moteur de scan…</p>
-  </div>
-
   <!-- Toast -->
   <div class="toast" id="toast" hidden></div>
+
+  <!-- Entrées fichier -->
+  <input type="file" id="fileInput" accept="image/*" capture="environment" hidden>
+  <input type="file" id="galleryInput" accept="image/jpeg,image/png,image/webp,image/*" hidden>
 </div>
 
-<!-- Libraries (loaded in the user's browser) -->
+<!-- Librairies -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js"></script>
 <script>
-  // Robust OpenCV.js init: expose a Module hook before the script loads.
   window.__cvReady = false;
   var Module = { onRuntimeInitialized() { window.__cvReady = true; window.dispatchEvent(new Event('opencv-ready')); } };
 </script>

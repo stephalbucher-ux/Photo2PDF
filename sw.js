@@ -1,5 +1,5 @@
-/* Scanorama service worker — offline support */
-const CACHE = "scanorama-v3";
+/* PHOTO 2 PDF service worker — offline support */
+const CACHE = "photo2pdf-v4";
 const SHELL = [
   "./",
   "./index.html",
