@@ -1,6 +1,14 @@
 # Scanorama — Scanner de documents (PWA)
 
-Photo → PDF net. Recadrage automatique du document + filtre **noir & blanc par seuillage adaptatif** (`cv.adaptiveThreshold`). Sortie en **PDF multipage** ou **un fichier par page**. S'installe sur Android comme une vraie application (icône, plein écran, hors-ligne).
+Photo → PDF net. Recadrage automatique du document + filtres. Sortie en **PDF multipage** ou **un fichier par page**. S'installe sur Android comme une vraie application (icône, plein écran, hors-ligne).
+
+## Nouveautés (v3)
+
+- **Importer** : ouvre une photo existante de la galerie (JPG, JPEG, PNG, WebP…) en plus de la capture caméra.
+- **Rotation** : boutons ⟲ / ⟳ sur l'aperçu (90° par appui).
+- **Détourage manuel 4 points** : bouton **⛶ Cadre** → déplace les 4 coins sur les bords du document (avec loupe de précision), Valider redresse la perspective. « Auto » relance la détection.
+- **Filtre « Amélioré »** (par défaut) : suppression des ombres et du jaunissement (correction *flat-field* : division par le fond estimé), contraste et netteté (*unsharp mask*). Idéal pour un beau rendu de document texte. Le N&B et le Gris profitent aussi de la normalisation d'éclairage.
+- **Mémoire mobile corrigée** : les pages ajoutées sont stockées compressées (JPEG/PNG) et plus en bitmaps pleine résolution ; tous les canvas intermédiaires sont libérés. Bouton **Tout effacer** pour vider la file. Cela corrige les blocages à la 2ᵉ utilisation sur téléphone.
 
 ## Table des fichiers
 
@@ -17,11 +25,19 @@ Les librairies **OpenCV.js** et **jsPDF** sont chargées depuis un CDN au premie
 
 ## Important : contexte sécurisé (HTTPS)
 
-Le service worker, l'installation PWA et l'accès caméra exigent **HTTPS** (ou `localhost`). L'hébergement **GitHub Pages** fournit le HTTPS automatiquement.
+Le service worker, l'installation PWA et l'accès caméra exigent **HTTPS** (ou `localhost`). Un hébergement type **Vercel** fournit le HTTPS automatiquement — c'est le plus simple, comme pour My Prono Family.
 
-## Utilisation en ligne
+## Déploiement Vercel (recommandé)
 
-Ouvre https://stephalbucher-ux.github.io/Photo2PDF/ dans Chrome → menu ⋮ → **Ajouter à l'écran d'accueil / Installer l'application**.
+```powershell
+# Depuis le dossier décompressé
+cd .\scanorama
+npm i -g vercel      # si pas déjà installé
+vercel               # suivre les invites → URL en https://
+vercel --prod        # mise en production
+```
+
+Puis, sur ton Android : ouvre l'URL dans Chrome → menu ⋮ → **Ajouter à l'écran d'accueil / Installer l'application**.
 
 ## Test rapide en local (sur ton PC)
 
@@ -30,6 +46,8 @@ cd .\scanorama
 npx serve -l 3000    # ou : python -m http.server 3000
 # Ouvre http://localhost:3000 dans Chrome (localhost = contexte sécurisé)
 ```
+
+Pour tester depuis le téléphone, le plus simple reste de déployer sur Vercel et d'ouvrir l'URL https.
 
 ## Comment ça marche
 

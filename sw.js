@@ -1,5 +1,5 @@
 /* Scanorama service worker — offline support */
-const CACHE = "scanorama-v2";
+const CACHE = "scanorama-v3";
 const SHELL = [
   "./",
   "./index.html",
