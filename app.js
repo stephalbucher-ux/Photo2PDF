@@ -8,12 +8,13 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = "4.1";
+  const APP_VERSION = "4.3";
 
   // ---------- State ----------
   let mode = null;             // "single" | "batch" | "open"
-  const pages = [];            // lot : { dataUrl, mime, w, h, thumbUrl }
+  const pages = [];            // lot : { srcUrl, corners, filter, opts, mime, w, h, dataUrl, thumbUrl }
   let current = null;          // { src, corners|null, color, detected }
+  let editingIndex = -1;       // -1 = nouvelle capture ; >=0 = édition de pages[i]
   let activeFilter = "enhance";
   let quality = "standard";    // compact | standard | high
   let cvReady = window.__cvReady === true;
@@ -36,6 +37,7 @@
   const rowBright = $("rowBright"), rowContrast = $("rowContrast"), rowSharp = $("rowSharp");
   const rowBlock = $("rowBlock"), rowC = $("rowC");
   const queue = $("queue"), queueStrip = $("queueStrip"), clearBtn = $("clearBtn");
+  const prevPageBtn = $("prevPageBtn"), nextPageBtn = $("nextPageBtn");
   const counter = $("counter"), pageCount = $("pageCount"), plural = $("plural");
   const dockBatch = $("dockBatch"), dockSingle = $("dockSingle");
   const addPageBtn = $("addPageBtn"), finishBtn = $("finishBtn");
@@ -83,6 +85,7 @@
     mode = m;
     freeCurrent();
     pages.length = 0;
+    editingIndex = -1;
     queueStrip.textContent = "";
     modeTitle.textContent = m === "single" ? "SCAN UNIQUE" : m === "batch" ? "SCAN LOT" : "OUVRIR IMAGE";
     counter.hidden = (m !== "batch");
@@ -102,6 +105,7 @@
   function goHome() {
     freeCurrent();
     pages.length = 0;
+    editingIndex = -1;
     queueStrip.textContent = "";
     resetPreview();
     showScreen(screenHome);
@@ -133,12 +137,26 @@
     current = null;
   }
 
+  // Compte les pages enregistrées + la page en cours (si nouvelle capture non ajoutée)
+  function effectiveCount() {
+    return pages.length + ((current && editingIndex < 0) ? 1 : 0);
+  }
+  function refreshBatchAddBtn() {
+    if (mode !== "batch") return;
+    if (editingIndex >= 0) { addPageBtn.textContent = "✓ Valider les modifs"; addPageBtn.disabled = !current; }
+    else if (current) { addPageBtn.textContent = "＋ Ajouter la page"; addPageBtn.disabled = false; }
+    else { addPageBtn.textContent = "📷 Prendre une photo"; addPageBtn.disabled = false; }
+  }
   function updateCounter() {
-    pageCount.textContent = pages.length;
-    plural.textContent = pages.length > 1 ? "s" : "";
-    finishBtn.disabled = pages.length === 0 && !current;
-    finishBtn.textContent = pages.length > 0 ? `Terminer (${pages.length})` : "Terminer";
+    const n = effectiveCount();
+    pageCount.textContent = n;
+    plural.textContent = n > 1 ? "s" : "";
+    finishBtn.disabled = n === 0;
+    finishBtn.textContent = n > 0 ? `Terminer (${n})` : "Terminer";
     queue.hidden = pages.length === 0;
+    prevPageBtn.disabled = pages.length === 0;
+    nextPageBtn.disabled = pages.length === 0;
+    refreshBatchAddBtn();
   }
 
   async function fileToCanvas(file) {
@@ -403,13 +421,14 @@
       await new Promise(r => setTimeout(r, 60));
       const { canvas: cropped, corners, detected } = cropToDocument(srcCanvas);
       current = { src: srcCanvas, corners, color: cropped, detected };
+      editingIndex = -1;
       renderCurrent();
       detectBadge.hidden = false;
       detectBadge.textContent = detected ? "Document détecté" : "Bords non trouvés — ajuste le cadre";
       detectBadge.className = "badge " + (detected ? "ok" : "warn");
-      addPageBtn.disabled = false;
       saveBtn.disabled = false;
-      finishBtn.disabled = pages.length === 0 && !current;
+      renderQueue();
+      updateCounter();
       if (!detected) showToast("Bords non détectés : utilise ⛶ Cadre pour ajuster.", true);
     } catch (err) {
       console.error(err);
@@ -620,6 +639,26 @@
   });
 
   // ---------- Filtres + réglages ----------
+  function setFilterButtons(filter) {
+    document.querySelectorAll(".seg-btn[data-filter]").forEach(b => {
+      const on = b.dataset.filter === filter;
+      b.classList.toggle("is-active", on);
+      if (on) b.setAttribute("aria-selected", "true"); else b.removeAttribute("aria-selected");
+    });
+  }
+  function setSliders(opts) {
+    opts = opts || {};
+    brightness.value = opts.bright != null ? opts.bright : 0;
+    contrast.value = opts.contrast != null ? opts.contrast : 0;
+    sharpness.value = opts.sharp != null ? opts.sharp : 0;
+    blockSize.value = opts.block != null ? opts.block : 25;
+    cValue.value = opts.c != null ? opts.c : 10;
+    brightVal.textContent = brightness.value;
+    contrastVal.textContent = contrast.value;
+    sharpVal.textContent = sharpness.value;
+    blockVal.textContent = blockSize.value;
+    cVal.textContent = cValue.value;
+  }
   function updateTuneRows() {
     const bw = (activeFilter === "bw");
     rowBright.hidden = bw;
@@ -664,64 +703,144 @@
     return url;
   }
 
-  function commitCurrentToPages() {
-    if (!current) return false;
-    const final = applyFilter(current.color, activeFilter, getOpts());
-    const mime = activeFilter === "bw" ? "image/png" : "image/jpeg";
+  // Sérialise la page en cours (image source + réglages) → objet page ré-éditable
+  function serializeCurrent() {
+    const opts = getOpts();
+    const filter = activeFilter;
+    const final = applyFilter(current.color, filter, opts);
+    const mime = filter === "bw" ? "image/png" : "image/jpeg";
     const page = {
-      mime,
-      w: final.width, h: final.height,
+      srcUrl: current.src.toDataURL("image/jpeg", 0.85),
+      corners: current.corners ? current.corners.map(p => ({ x: p.x, y: p.y })) : null,
+      filter, opts,
+      mime, w: final.width, h: final.height,
       dataUrl: final.toDataURL(mime, 0.92),
       thumbUrl: makeThumb(final)
     };
     if (final !== current.color) freeCanvas(final);
+    return page;
+  }
+
+  function commitNew() {
+    if (!current) return false;
+    const page = serializeCurrent();
     freeCurrent();
     pages.push(page);
-    addThumb(page);
-    updateCounter();
     resetPreview();
+    renderQueue();
+    updateCounter();
     return true;
   }
 
-  addPageBtn.addEventListener("click", () => {
-    if (!current) return;
-    commitCurrentToPages();
-    showToast("Page ajoutée (" + pages.length + ")");
-    // Enchaîne sur la photo suivante (dans le geste utilisateur)
-    fileInput.value = "";
-    fileInput.click();
-  });
+  function updatePage(i) {
+    if (!current || i < 0 || i >= pages.length) return;
+    pages[i] = serializeCurrent();
+    freeCurrent();
+    editingIndex = -1;
+    resetPreview();
+    renderQueue();
+    updateCounter();
+  }
 
-  function addThumb(page) {
-    const el = document.createElement("div");
-    el.className = "thumb";
-    const img = document.createElement("img");
-    img.src = page.thumbUrl;
-    const num = document.createElement("span");
-    num.className = "num";
-    const del = document.createElement("button");
-    del.className = "del"; del.textContent = "✕"; del.setAttribute("aria-label", "Supprimer la page");
-    del.addEventListener("click", () => {
-      const idx = pages.indexOf(page);
-      if (idx > -1) pages.splice(idx, 1);
-      el.remove();
-      renumber();
-      updateCounter();
-    });
-    el.append(img, num, del);
-    queueStrip.appendChild(el);
-    renumber();
+  // Recharge une page enregistrée dans l'éditeur pour la modifier
+  async function editPage(i) {
+    if (i < 0 || i >= pages.length) return;
+    // Sauvegarde l'état courant avant de changer de page (aucune perte)
+    if (current) {
+      if (editingIndex >= 0) { pages[editingIndex] = serializeCurrent(); freeCurrent(); }
+      else { commitNew(); showToast("Page ajoutée (" + pages.length + ")"); }
+    }
+    const p = pages[i];
+    const img = new Image();
+    try {
+      await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = p.srcUrl; });
+    } catch { showToast("Impossible de recharger la page.", true); return; }
+    const src = document.createElement("canvas");
+    src.width = img.naturalWidth; src.height = img.naturalHeight;
+    src.getContext("2d").drawImage(img, 0, 0);
+    let color;
+    if (p.corners) {
+      color = warpWithCorners(src, p.corners);
+    } else {
+      color = document.createElement("canvas");
+      color.width = src.width; color.height = src.height;
+      color.getContext("2d").drawImage(src, 0, 0);
+    }
+    freeCurrent();
+    current = { src, corners: p.corners ? p.corners.map(c => ({ x: c.x, y: c.y })) : null, color, detected: !!p.corners };
+    editingIndex = i;
+    activeFilter = p.filter || "enhance";
+    setFilterButtons(activeFilter);
+    setSliders(p.opts);
+    updateTuneRows();
+    showScreen(screenEdit);
+    renderCurrent();
+    detectBadge.hidden = false;
+    detectBadge.textContent = "Modification page " + (i + 1);
+    detectBadge.className = "badge ok";
+    saveBtn.disabled = false;
+    renderQueue();
+    updateCounter();
   }
-  function renumber() {
-    [...queueStrip.children].forEach((el, i) => {
-      const n = el.querySelector(".num"); if (n) n.textContent = String(i + 1).padStart(2, "0");
+
+  // Navigation ‹ › entre les pages du lot
+  function navPage(dir) {
+    if (!pages.length) return;
+    let i = editingIndex;
+    if (i < 0) i = (dir > 0) ? 0 : pages.length - 1;
+    else i = Math.min(pages.length - 1, Math.max(0, i + dir));
+    editPage(i);
+  }
+  prevPageBtn.addEventListener("click", () => navPage(-1));
+  nextPageBtn.addEventListener("click", () => navPage(1));
+
+  function renderQueue() {
+    queueStrip.textContent = "";
+    pages.forEach((page, i) => {
+      const el = document.createElement("div");
+      el.className = "thumb" + (i === editingIndex ? " editing" : "");
+      const img = document.createElement("img");
+      img.src = page.thumbUrl;
+      const num = document.createElement("span");
+      num.className = "num";
+      num.textContent = String(i + 1).padStart(2, "0");
+      const del = document.createElement("button");
+      del.className = "del"; del.textContent = "✕"; del.setAttribute("aria-label", "Supprimer la page");
+      del.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        pages.splice(i, 1);
+        if (editingIndex === i) editingIndex = -1;
+        else if (editingIndex > i) editingIndex -= 1;
+        renderQueue();
+        updateCounter();
+      });
+      el.addEventListener("click", () => editPage(i));
+      el.append(img, num, del);
+      queueStrip.appendChild(el);
     });
   }
+
+  addPageBtn.addEventListener("click", () => {
+    if (editingIndex >= 0) {
+      updatePage(editingIndex);
+      showToast("Page mise à jour");
+    } else if (current) {
+      commitNew();
+      showToast("Page ajoutée (" + pages.length + ")");
+      // Enchaîne sur la photo suivante (dans le geste utilisateur)
+      fileInput.value = "";
+      fileInput.click();
+    } else {
+      fileInput.value = "";
+      fileInput.click();
+    }
+  });
 
   clearBtn.addEventListener("click", () => {
     if (!pages.length) return;
     pages.length = 0;
-    queueStrip.textContent = "";
+    editingIndex = -1;
+    renderQueue();
     updateCounter();
     showToast("Pages effacées");
   });
@@ -755,7 +874,8 @@
 
   saveBtn.addEventListener("click", () => { if (current) openSaveSheet(); });
   finishBtn.addEventListener("click", () => {
-    if (current) { commitCurrentToPages(); showToast("Page ajoutée (" + pages.length + ")"); }
+    if (editingIndex >= 0) { updatePage(editingIndex); }
+    else if (current) { commitNew(); }
     if (!pages.length) return;
     openSaveSheet();
   });

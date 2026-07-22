@@ -140,8 +140,13 @@
       <section class="queue" id="queue" hidden>
         <div class="queue-head">
           <span class="queue-title">Pages du lot</span>
-          <button class="clear-all" id="clearBtn">Tout effacer</button>
+          <div class="queue-nav">
+            <button class="qnav" id="prevPageBtn" aria-label="Page précédente">‹</button>
+            <button class="qnav" id="nextPageBtn" aria-label="Page suivante">›</button>
+            <button class="clear-all" id="clearBtn">Tout effacer</button>
+          </div>
         </div>
+        <p class="queue-tip">Touche une vignette pour la modifier</p>
         <div class="queue-strip" id="queueStrip"></div>
       </section>
     </main>
