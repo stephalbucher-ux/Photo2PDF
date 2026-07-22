@@ -8,7 +8,7 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = "4.4";
+  const APP_VERSION = "4.5";
 
   // ---------- State ----------
   let mode = null;             // "single" | "batch" | "open"
@@ -48,6 +48,11 @@
   const cropEditor = $("cropEditor"), cropStage = $("cropStage"), cropCanvas = $("cropCanvas");
   const loupeCanvas = $("loupeCanvas");
   const cropCancel = $("cropCancel"), cropReset = $("cropReset"), cropApply = $("cropApply");
+  const fsView = $("fsView"), fsStage = $("fsStage"), fsCanvas = $("fsCanvas"), fsClose = $("fsClose"), fsControls = $("fsControls");
+
+  // Emplacement d'origine de la section filtres (déplacée en plein écran puis restaurée)
+  const filtersHome = { parent: filters.parentNode, next: filters.nextSibling };
+  let fsOpen = false;
 
   $("verSplash").textContent = APP_VERSION;
   $("verHome").textContent = APP_VERSION;
@@ -395,10 +400,38 @@
     if (!current) return;
     const disp = applyFilter(current.color, activeFilter, getOpts());
     drawPreview(disp);
+    if (fsOpen) {
+      fsCanvas.width = disp.width; fsCanvas.height = disp.height;
+      fsCanvas.getContext("2d").drawImage(disp, 0, 0);
+    }
     if (disp !== current.color) freeCanvas(disp);
   }
 
+  // ---------- Aperçu plein écran ----------
+  function openFullscreen() {
+    if (!current || fsOpen) return;
+    fsOpen = true;
+    fsControls.appendChild(filters);   // déplace les filtres + réglages qualité
+    filters.hidden = false;
+    tunePanel.hidden = false;          // réglages visibles d'emblée
+    updateTuneRows();
+    fsView.hidden = false;
+    renderCurrent();
+  }
+  function closeFullscreen() {
+    if (!fsOpen) return;
+    fsOpen = false;
+    fsView.hidden = true;
+    filtersHome.parent.insertBefore(filters, filtersHome.next); // remet les filtres à leur place
+    freeCanvas(fsCanvas);
+    renderCurrent();
+  }
+  previewCanvas.addEventListener("click", openFullscreen);
+  fsStage.addEventListener("click", closeFullscreen);
+  fsClose.addEventListener("click", closeFullscreen);
+
   function resetPreview() {
+    closeFullscreen();
     addPageBtn.disabled = true;
     saveBtn.disabled = true;
     previewWrap.hidden = true;

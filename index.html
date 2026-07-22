@@ -210,6 +210,18 @@
     </div>
   </div>
 
+  <!-- ============ Aperçu plein écran ============ -->
+  <div class="fsview" id="fsView" hidden>
+    <div class="fsview-top">
+      <span class="fsview-hint">Touche l'image pour fermer</span>
+      <button class="fsview-close" id="fsClose" aria-label="Fermer">✕</button>
+    </div>
+    <div class="fsview-stage" id="fsStage">
+      <canvas id="fsCanvas"></canvas>
+    </div>
+    <div class="fsview-controls" id="fsControls"></div>
+  </div>
+
   <!-- Toast -->
   <div class="toast" id="toast" hidden></div>
 
