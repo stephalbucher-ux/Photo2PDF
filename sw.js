@@ -1,5 +1,5 @@
 /* PHOTO 2 PDF service worker — offline support */
-const CACHE = "photo2pdf-v4-3";
+const CACHE = "photo2pdf-v4-4";
 const SHELL = [
   "./",
   "./index.html",

@@ -98,11 +98,19 @@
           <div class="scanline" id="scanline" hidden></div>
         </div>
         <div class="badge" id="detectBadge" hidden></div>
-        <div class="editbar" id="editBar" hidden>
-          <button class="tool" id="rotLeftBtn" aria-label="Rotation à gauche">⟲</button>
-          <button class="tool" id="rotRightBtn" aria-label="Rotation à droite">⟳</button>
-          <button class="tool tool-wide" id="cropBtn">⛶ Cadre</button>
-        </div>
+      </section>
+
+      <!-- Barre d'action : rotation & recadrage -->
+      <section class="toolbar" id="editBar" hidden>
+        <button class="tbtn" id="rotLeftBtn" aria-label="Rotation à gauche">
+          <span class="tbtn-ic">⟲</span><span class="tbtn-lbl">Rotation G</span>
+        </button>
+        <button class="tbtn" id="rotRightBtn" aria-label="Rotation à droite">
+          <span class="tbtn-ic">⟳</span><span class="tbtn-lbl">Rotation D</span>
+        </button>
+        <button class="tbtn tbtn-crop" id="cropBtn" aria-label="Recadrer">
+          <span class="tbtn-ic">⛶</span><span class="tbtn-lbl">Recadrer</span>
+        </button>
       </section>
 
       <section class="filters" id="filters" hidden>
