@@ -8,13 +8,16 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = "4.5";
+  const APP_VERSION = "4.6";
 
   // ---------- State ----------
   let mode = null;             // "single" | "batch" | "open"
   const pages = [];            // lot : { srcUrl, corners, filter, opts, mime, w, h, dataUrl, thumbUrl }
   let current = null;          // { src, corners|null, color, detected }
   let editingIndex = -1;       // -1 = nouvelle capture ; >=0 = édition de pages[i]
+  let preparedBlob = null;     // PDF pré-construit prêt à enregistrer/partager
+  let preparing = false;       // préparation du PDF en cours
+  let prepareToken = 0;        // annule les préparations obsolètes (changement de qualité, fermeture)
   let activeFilter = "enhance";
   let quality = "standard";    // compact | standard | high
   let cvReady = window.__cvReady === true;
@@ -89,8 +92,8 @@
   function startMode(m) {
     mode = m;
     freeCurrent();
-    pages.length = 0;
-    editingIndex = -1;
+    clearPages();
+    preparedBlob = null; preparing = false; prepareToken++;
     queueStrip.textContent = "";
     modeTitle.textContent = m === "single" ? "SCAN UNIQUE" : m === "batch" ? "SCAN LOT" : "OUVRIR IMAGE";
     counter.hidden = (m !== "batch");
@@ -109,8 +112,8 @@
 
   function goHome() {
     freeCurrent();
-    pages.length = 0;
-    editingIndex = -1;
+    clearPages();
+    preparedBlob = null; preparing = false; prepareToken++;
     queueStrip.textContent = "";
     resetPreview();
     showScreen(screenHome);
@@ -171,7 +174,7 @@
     } catch {
       bmp = await createImageBitmap(file);
     }
-    const MAX = 2400;
+    const MAX = 2000; // grand côté : compromis netteté texte / mémoire (stabilité mobile)
     let { width: w, height: h } = bmp;
     const scale = Math.min(1, MAX / Math.max(w, h));
     w = Math.round(w * scale); h = Math.round(h * scale);
@@ -440,6 +443,8 @@
     detectBadge.hidden = true;
     emptyState.hidden = false;
     freeCanvas(previewCanvas);
+    freeCanvas(fsCanvas);
+    freeCanvas(cropCanvas);
   }
 
   // ---------- Chargement d'une photo ----------
@@ -736,22 +741,33 @@
     return url;
   }
 
-  // Sérialise la page en cours (image source + réglages) → objet page ré-éditable
+  // Réduit un canvas en dataURL JPEG compact (limite mémoire mobile)
+  function canvasToCompactURL(canvas, maxEdge, q) {
+    const long = Math.max(canvas.width, canvas.height);
+    const s = Math.min(1, maxEdge / long);
+    if (s === 1) return canvas.toDataURL("image/jpeg", q);
+    const t = document.createElement("canvas");
+    t.width = Math.max(1, Math.round(canvas.width * s));
+    t.height = Math.max(1, Math.round(canvas.height * s));
+    t.getContext("2d").drawImage(canvas, 0, 0, t.width, t.height);
+    const url = t.toDataURL("image/jpeg", q);
+    freeCanvas(t);
+    return url;
+  }
+
+  // Sérialise la page : SEULE l'image source (compacte) + réglages sont conservés.
+  // Le rendu final est recalculé au moment de l'export → mémoire fortement réduite.
   function serializeCurrent() {
     const opts = getOpts();
     const filter = activeFilter;
     const final = applyFilter(current.color, filter, opts);
-    const mime = filter === "bw" ? "image/png" : "image/jpeg";
-    const page = {
-      srcUrl: current.src.toDataURL("image/jpeg", 0.85),
-      corners: current.corners ? current.corners.map(p => ({ x: p.x, y: p.y })) : null,
-      filter, opts,
-      mime, w: final.width, h: final.height,
-      dataUrl: final.toDataURL(mime, 0.92),
-      thumbUrl: makeThumb(final)
-    };
+    const thumbUrl = makeThumb(final);
     if (final !== current.color) freeCanvas(final);
-    return page;
+    return {
+      srcUrl: canvasToCompactURL(current.src, 1700, 0.82),
+      corners: current.corners ? current.corners.map(p => ({ x: p.x, y: p.y })) : null,
+      filter, opts, thumbUrl
+    };
   }
 
   function commitNew() {
@@ -869,10 +885,16 @@
     }
   });
 
-  clearBtn.addEventListener("click", () => {
-    if (!pages.length) return;
+  // Vide la file et déréférence les grosses chaînes (aide le ramasse-miettes)
+  function clearPages() {
+    pages.forEach(p => { p.srcUrl = null; p.thumbUrl = null; });
     pages.length = 0;
     editingIndex = -1;
+  }
+
+  clearBtn.addEventListener("click", () => {
+    if (!pages.length) return;
+    clearPages();
     renderQueue();
     updateCounter();
     showToast("Pages effacées");
@@ -893,8 +915,12 @@
   function openSaveSheet() {
     fileName.value = defaultName();
     saveSheet.hidden = false;
+    prepareExport();
   }
-  saveCancel.addEventListener("click", () => { saveSheet.hidden = true; });
+  saveCancel.addEventListener("click", () => {
+    saveSheet.hidden = true;
+    preparedBlob = null; preparing = false; prepareToken++;
+  });
 
   document.querySelectorAll(".seg-btn[data-q]").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -902,6 +928,7 @@
       btn.classList.add("is-active"); btn.setAttribute("aria-selected", "true");
       quality = btn.dataset.q;
       qualityHint.textContent = QUALITY[quality].hint;
+      if (!saveSheet.hidden) prepareExport(); // reconstruit le PDF à la nouvelle qualité
     });
   });
 
@@ -926,46 +953,49 @@
     return c;
   }
 
-  // Ré-encode une page stockée selon la qualité (séquentiel, mémoire maîtrisée)
-  function transcodePage(page, q) {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => {
-        const c = scaleCanvasFrom(img, page.w, page.h, q.scale);
-        const out = {
-          mime: page.mime, w: c.width, h: c.height,
-          dataUrl: page.mime === "image/png" ? c.toDataURL("image/png") : c.toDataURL("image/jpeg", q.jpeg)
-        };
-        freeCanvas(c);
-        resolve(out);
-      };
-      img.onerror = reject;
-      img.src = page.dataUrl;
-    });
+  function loadImage(url) {
+    return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+  }
+
+  // Recompose une page du lot depuis sa source compacte, à la qualité choisie
+  async function renderPageForExport(page, q) {
+    const img = await loadImage(page.srcUrl);
+    const src = document.createElement("canvas");
+    src.width = img.naturalWidth; src.height = img.naturalHeight;
+    src.getContext("2d").drawImage(img, 0, 0);
+    let color;
+    if (page.corners) color = warpWithCorners(src, page.corners);
+    else { color = document.createElement("canvas"); color.width = src.width; color.height = src.height; color.getContext("2d").drawImage(src, 0, 0); }
+    freeCanvas(src);
+    const final = applyFilter(color, page.filter, page.opts);
+    let outC = final;
+    if (q.scale !== 1) outC = scaleCanvasFrom(final, final.width, final.height, q.scale);
+    const mime = page.filter === "bw" ? "image/png" : "image/jpeg";
+    const dataUrl = mime === "image/png" ? outC.toDataURL("image/png") : outC.toDataURL("image/jpeg", q.jpeg);
+    const res = { mime, w: outC.width, h: outC.height, dataUrl };
+    if (outC !== final) freeCanvas(outC);
+    if (final !== color) freeCanvas(final);
+    freeCanvas(color);
+    return res;
   }
 
   async function collectPagesForExport() {
     const q = QUALITY[quality];
     if (mode === "batch") {
-      if (q.scale === 1 && quality !== "compact") return pages; // stockées à 0.92, très proche
       const list = [];
-      for (const p of pages) list.push(await transcodePage(p, q));
+      for (const p of pages) list.push(await renderPageForExport(p, q)); // séquentiel : 1 page à la fois
       return list;
     }
-    // single / open : rendu direct depuis current à la qualité choisie
-    let final = applyFilter(current.color, activeFilter, getOpts());
+    // single / open : rendu direct depuis current
+    const final = applyFilter(current.color, activeFilter, getOpts());
     let outC = final;
-    if (q.scale !== 1) {
-      outC = scaleCanvasFrom(final, final.width, final.height, q.scale);
-      if (final !== current.color) freeCanvas(final);
-    }
+    if (q.scale !== 1) outC = scaleCanvasFrom(final, final.width, final.height, q.scale);
     const mime = activeFilter === "bw" ? "image/png" : "image/jpeg";
-    const page = {
-      mime, w: outC.width, h: outC.height,
-      dataUrl: mime === "image/png" ? outC.toDataURL("image/png") : outC.toDataURL("image/jpeg", q.jpeg)
-    };
-    if (outC !== current.color) freeCanvas(outC);
-    return [page];
+    const dataUrl = mime === "image/png" ? outC.toDataURL("image/png") : outC.toDataURL("image/jpeg", q.jpeg);
+    const res = [{ mime, w: outC.width, h: outC.height, dataUrl }];
+    if (outC !== final) freeCanvas(outC);
+    if (final !== current.color) freeCanvas(final);
+    return res;
   }
 
   function buildDoc(jsPDF, pageList) {
@@ -984,57 +1014,79 @@
 
   function finishSession(msg) {
     saveSheet.hidden = true;
+    preparedBlob = null; preparing = false; prepareToken++;
     goHome();
     showToast(msg);
   }
 
   function getJsPDF() {
-    if (window.jspdf && window.jspdf.jsPDF) return window.jspdf.jsPDF;
-    showToast("Module PDF non chargé — ferme et rouvre l'application.", true);
-    return null;
+    return (window.jspdf && window.jspdf.jsPDF) ? window.jspdf.jsPDF : null;
   }
 
-  downloadBtn.addEventListener("click", async () => {
+  function setSaveButtonsState(state) {
+    const ready = state === "ready";
+    downloadBtn.disabled = !ready;
+    shareBtn.disabled = !ready;
+    downloadBtn.textContent = state === "preparing" ? "⏳ Préparation…" : "💾 Enregistrer";
+    shareBtn.textContent = state === "preparing" ? "⏳ Préparation…" : "📤 Transférer";
+  }
+
+  // Construit le PDF À L'AVANCE (à l'ouverture de la fiche / au changement de qualité)
+  // pour que le clic Enregistrer/Transférer soit SYNCHRONE et conserve l'activation
+  // utilisateur — indispensable au téléchargement/partage sur mobile.
+  async function prepareExport() {
+    const token = ++prepareToken;
+    preparing = true; preparedBlob = null;
+    setSaveButtonsState("preparing");
     try {
-      downloadBtn.disabled = true;
-      const name = sanitizeName(fileName.value);
       const jsPDF = getJsPDF();
-      if (!jsPDF) return;
+      if (!jsPDF) throw new Error("jsPDF absent");
       const list = await collectPagesForExport();
+      if (token !== prepareToken) return;            // une préparation plus récente a pris le relais
       const doc = buildDoc(jsPDF, list);
-      doc.save(name + ".pdf");
-      finishSession("PDF enregistré : " + name + ".pdf");
+      list.forEach(p => { p.dataUrl = null; });        // libère les dataURL (déjà copiées dans le doc)
+      const blob = doc.output("blob");
+      if (token !== prepareToken) return;
+      preparedBlob = blob;
+      preparing = false;
+      setSaveButtonsState("ready");
     } catch (err) {
       console.error(err);
-      showToast("Échec de la création du PDF.", true);
-    } finally {
-      downloadBtn.disabled = false;
+      if (token === prepareToken) {
+        preparing = false;
+        setSaveButtonsState("preparing");            // laisse les boutons désactivés
+        showToast("Préparation du PDF impossible — ferme et rouvre l'application.", true);
+      }
     }
+  }
+
+  function triggerDownload(name) {
+    const url = URL.createObjectURL(preparedBlob);
+    const a = document.createElement("a");
+    a.href = url; a.download = name + ".pdf";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+
+  downloadBtn.addEventListener("click", () => {
+    if (preparing || !preparedBlob) { showToast("Préparation en cours…"); return; }
+    const name = sanitizeName(fileName.value);
+    triggerDownload(name);
+    finishSession("PDF enregistré : " + name + ".pdf");
   });
 
-  shareBtn.addEventListener("click", async () => {
-    try {
-      shareBtn.disabled = true;
-      const name = sanitizeName(fileName.value);
-      const jsPDF = getJsPDF();
-      if (!jsPDF) return;
-      const list = await collectPagesForExport();
-      const doc = buildDoc(jsPDF, list);
-      const blob = doc.output("blob");
-      const file = new File([blob], name + ".pdf", { type: "application/pdf" });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: name });
-        finishSession("Document transféré");
-      } else {
-        doc.save(name + ".pdf");
-        finishSession("Partage non disponible ici — PDF téléchargé");
-      }
-    } catch (err) {
-      if (err && err.name === "AbortError") { shareBtn.disabled = false; return; } // partage annulé
-      console.error(err);
-      showToast("Échec du transfert.", true);
-    } finally {
-      shareBtn.disabled = false;
+  shareBtn.addEventListener("click", () => {
+    if (preparing || !preparedBlob) { showToast("Préparation en cours…"); return; }
+    const name = sanitizeName(fileName.value);
+    const file = new File([preparedBlob], name + ".pdf", { type: "application/pdf" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      // appel synchrone : l'activation utilisateur est préservée
+      navigator.share({ files: [file], title: name })
+        .then(() => finishSession("Document transféré"))
+        .catch(err => { if (!(err && err.name === "AbortError")) { console.error(err); showToast("Transfert impossible.", true); } });
+    } else {
+      triggerDownload(name);
+      finishSession("Partage non disponible ici — PDF téléchargé");
     }
   });
 
