@@ -8,7 +8,7 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = "4.6";
+  const APP_VERSION = "4.7";
 
   // ---------- State ----------
   let mode = null;             // "single" | "batch" | "open"
@@ -741,18 +741,20 @@
     return url;
   }
 
-  // Réduit un canvas en dataURL JPEG compact (limite mémoire mobile)
-  function canvasToCompactURL(canvas, maxEdge, q) {
+  // Réduit un canvas en dataURL JPEG compact (limite mémoire mobile).
+  // Renvoie aussi l'échelle réellement appliquée (sx, sy) pour garder les coins du cadre alignés.
+  function canvasToCompact(canvas, maxEdge, q) {
     const long = Math.max(canvas.width, canvas.height);
     const s = Math.min(1, maxEdge / long);
-    if (s === 1) return canvas.toDataURL("image/jpeg", q);
+    if (s === 1) return { url: canvas.toDataURL("image/jpeg", q), sx: 1, sy: 1 };
     const t = document.createElement("canvas");
     t.width = Math.max(1, Math.round(canvas.width * s));
     t.height = Math.max(1, Math.round(canvas.height * s));
     t.getContext("2d").drawImage(canvas, 0, 0, t.width, t.height);
     const url = t.toDataURL("image/jpeg", q);
+    const sx = t.width / canvas.width, sy = t.height / canvas.height;
     freeCanvas(t);
-    return url;
+    return { url, sx, sy };
   }
 
   // Sérialise la page : SEULE l'image source (compacte) + réglages sont conservés.
@@ -763,9 +765,12 @@
     const final = applyFilter(current.color, filter, opts);
     const thumbUrl = makeThumb(final);
     if (final !== current.color) freeCanvas(final);
+    const comp = canvasToCompact(current.src, 1700, 0.82);
     return {
-      srcUrl: canvasToCompactURL(current.src, 1700, 0.82),
-      corners: current.corners ? current.corners.map(p => ({ x: p.x, y: p.y })) : null,
+      srcUrl: comp.url,
+      // v4.7 : coins ramenés dans le repère de la source réduite
+      // (avant : coins en 2000 px appliqués à une image 1700 px → cadre décalé à l'export)
+      corners: current.corners ? current.corners.map(p => ({ x: p.x * comp.sx, y: p.y * comp.sy })) : null,
       filter, opts, thumbUrl
     };
   }
